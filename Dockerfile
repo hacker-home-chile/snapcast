@@ -33,17 +33,17 @@ RUN wget -q "https://github.com/snapcast/snapweb/releases/download/v${SNAPWEB_VE
 
 FROM alpine:edge
 
-RUN apk add --no-cache libstdc++
+RUN apk add --no-cache libstdc++ socat
 
 COPY --from=builder /runtime-libs/ /usr/lib/
 COPY --from=builder /src/bin/snapserver /usr/bin/snapserver
 COPY --from=builder /snapweb/ /usr/share/snapserver/snapweb/
 
-# Default config: serve snapweb and use opus codec with FEC
-RUN mkdir -p /etc && printf '[http]\n\
-doc_root = /usr/share/snapserver/snapweb\n\
-[stream]\n\
-codec = opus\n' > /etc/snapserver.conf
+# Link /config/snapserver.conf -> /etc/snapserver.conf so mounted configs are picked up.
+# Fallback: if no config is mounted, use a minimal default with snapweb doc_root.
+RUN mkdir -p /config \
+ && printf '[http]\ndoc_root = /usr/share/snapserver/snapweb\n' > /config/snapserver.conf \
+ && ln -sf /config/snapserver.conf /etc/snapserver.conf
 
 EXPOSE 1704 1705 1706 1780
 
