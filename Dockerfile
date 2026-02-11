@@ -38,6 +38,7 @@ RUN apk add --no-cache libstdc++ socat
 COPY --from=builder /runtime-libs/ /usr/lib/
 COPY --from=builder /src/bin/snapserver /usr/bin/snapserver
 COPY --from=builder /snapweb/ /usr/share/snapserver/snapweb/
+RUN ln -s /usr/share/snapserver/snapweb /usr/share/snapweb
 
 # Link /config/snapserver.conf -> /etc/snapserver.conf so mounted configs are picked up.
 # Fallback: if no config is mounted, use a minimal default with snapweb doc_root.
