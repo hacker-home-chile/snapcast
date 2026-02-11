@@ -27,12 +27,14 @@
 // 3rd party headers
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/buffer.hpp>
+#include <boost/asio/ip/udp.hpp>
 #include <boost/asio/strand.hpp>
 
 // standard headers
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -184,6 +186,11 @@ public:
 
     /// Authentication info attached to this session
     AuthInfo authinfo;
+
+    /// UDP endpoint for this session (set when client registers via UDP)
+    std::optional<boost::asio::ip::udp::endpoint> udp_endpoint_;
+    /// Per-session UDP sequence counter for WireChunk ordering
+    uint16_t udp_sequence_{0};
 
 protected:
     /// Send next message from "messages_"

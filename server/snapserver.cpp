@@ -146,6 +146,12 @@ int main(int argc, char* argv[])
                                                               settings.tcp_stream.bind_to_address.front(), &settings.tcp_stream.bind_to_address[0]);
         conf.add<Value<bool>>("", "tcp-streaming.publish", "Publish TCP streaming service via mDNS", settings.tcp_stream.publish, &settings.tcp_stream.publish);
 
+        // UDP Streaming settings
+        conf.add<Value<bool>>("", "udp-streaming.enabled", "enable UDP audio streaming", settings.udp_stream.enabled, &settings.udp_stream.enabled);
+        conf.add<Value<size_t>>("", "udp-streaming.port", "which UDP port to use for audio streaming", settings.udp_stream.port, &settings.udp_stream.port);
+        auto udp_stream_bind_to_address = conf.add<Value<string>>("", "udp-streaming.bind_to_address", "address for the UDP streaming server to listen on",
+                                                                   settings.udp_stream.bind_to_address.front(), &settings.udp_stream.bind_to_address[0]);
+
         // stream settings
         conf.add<Value<std::filesystem::path>>("", "stream.plugin_dir", "stream plugin directory", settings.stream.plugin_dir, &settings.stream.plugin_dir);
         conf.add<Value<std::filesystem::path>>("", "stream.sandbox_dir", "directory with executable process stream sources", settings.stream.sandbox_dir,
@@ -333,6 +339,12 @@ int main(int argc, char* argv[])
             settings.tcp_stream.bind_to_address.clear();
             for (size_t n = 0; n < stream_bind_to_address->count(); ++n)
                 settings.tcp_stream.bind_to_address.push_back(stream_bind_to_address->value(n));
+        }
+        if (udp_stream_bind_to_address->is_set())
+        {
+            settings.udp_stream.bind_to_address.clear();
+            for (size_t n = 0; n < udp_stream_bind_to_address->count(); ++n)
+                settings.udp_stream.bind_to_address.push_back(udp_stream_bind_to_address->value(n));
         }
 
         if (!settings.ssl.certificate.empty() && !settings.ssl.certificate_key.empty())
