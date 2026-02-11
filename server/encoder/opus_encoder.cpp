@@ -65,13 +65,13 @@ OpusEncoder::~OpusEncoder()
 
 std::string OpusEncoder::getAvailableOptions() const
 {
-    return "BITRATE:[" + cpt::to_string(const_min_bitrate) + " - " + cpt::to_string(const_max_bitrate) + "|MAX|AUTO],COMPLEXITY:[1-10]";
+    return "BITRATE:[" + cpt::to_string(const_min_bitrate) + " - " + cpt::to_string(const_max_bitrate) + "|MAX|AUTO],COMPLEXITY:[1-10],FEC:[0-1],LOSS:[0-100]";
 }
 
 
 std::string OpusEncoder::getDefaultOptions() const
 {
-    return "BITRATE:192000,COMPLEXITY:10";
+    return "BITRATE:192000,COMPLEXITY:10,FEC:1,LOSS:5";
 }
 
 
@@ -98,8 +98,10 @@ void OpusEncoder::initEncoder()
 
     opus_int32 bitrate = 192000;
     opus_int32 complexity = 10;
+    opus_int32 fec_enabled = 1;
+    opus_int32 packet_loss_perc = 5;
 
-    // parse options: bitrate and complexity
+    // parse options: bitrate, complexity, FEC, LOSS
     auto options = utils::string::split(codecOptions_, ',');
     for (const auto& option : options)
     {
@@ -141,6 +143,32 @@ void OpusEncoder::initEncoder()
                     throw SnapException("Opus error parsing complexity (must be between 1 and 10): " + kv.back());
                 }
             }
+            else if (kv.front() == "FEC")
+            {
+                try
+                {
+                    fec_enabled = cpt::stoi(kv.back());
+                    if ((fec_enabled < 0) || (fec_enabled > 1))
+                        throw SnapException("Opus FEC must be 0 or 1");
+                }
+                catch (const std::invalid_argument&)
+                {
+                    throw SnapException("Opus error parsing FEC (must be 0 or 1): " + kv.back());
+                }
+            }
+            else if (kv.front() == "LOSS")
+            {
+                try
+                {
+                    packet_loss_perc = cpt::stoi(kv.back());
+                    if ((packet_loss_perc < 0) || (packet_loss_perc > 100))
+                        throw SnapException("Opus LOSS must be between 0 and 100");
+                }
+                catch (const std::invalid_argument&)
+                {
+                    throw SnapException("Opus error parsing LOSS (must be between 0 and 100): " + kv.back());
+                }
+            }
             else
                 throw SnapException("Opus unknown option: " + kv.front());
         }
@@ -148,10 +176,13 @@ void OpusEncoder::initEncoder()
             throw SnapException("Opus error parsing options: " + codecOptions_);
     }
 
-    LOG(INFO, LOG_TAG) << "Init - bitrate: " << bitrate << " bps, complexity: " << complexity << "\n";
+    LOG(INFO, LOG_TAG) << "Init - bitrate: " << bitrate << " bps, complexity: " << complexity << ", FEC: " << fec_enabled
+                       << ", packet loss: " << packet_loss_perc << "%\n";
 
     int error;
-    enc_ = opus_encoder_create(sampleFormat_.rate(), sampleFormat_.channels(), OPUS_APPLICATION_RESTRICTED_LOWDELAY, &error);
+    // Use OPUS_APPLICATION_AUDIO instead of RESTRICTED_LOWDELAY to enable in-band FEC.
+    // This adds ~2.5ms encoding latency — acceptable tradeoff for packet loss resilience.
+    enc_ = opus_encoder_create(sampleFormat_.rate(), sampleFormat_.channels(), OPUS_APPLICATION_AUDIO, &error);
     if (error != 0)
     {
         throw SnapException("Failed to initialize Opus encoder: " + std::string(opus_strerror(error)));
@@ -159,6 +190,8 @@ void OpusEncoder::initEncoder()
 
     opus_encoder_ctl(enc_, OPUS_SET_BITRATE(bitrate));
     opus_encoder_ctl(enc_, OPUS_SET_COMPLEXITY(complexity));
+    opus_encoder_ctl(enc_, OPUS_SET_INBAND_FEC(fec_enabled));
+    opus_encoder_ctl(enc_, OPUS_SET_PACKET_LOSS_PERC(packet_loss_perc));
 
     // create some opus pseudo header to let the decoder know about the sample format
     headerChunk_->payloadSize = 12;

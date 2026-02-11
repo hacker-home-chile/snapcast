@@ -104,10 +104,47 @@ void StreamServer::onChunkEncoded(const PcmStream* pcmStream, bool isDefaultStre
             }
         }
 
-        if (!session->pcmStream() && isDefaultStream) //->getName() == "default")
-            session->send(buffer);
-        else if (session->pcmStream().get() == pcmStream)
-            session->send(buffer);
+        bool shouldSend = (!session->pcmStream() && isDefaultStream) || (session->pcmStream().get() == pcmStream);
+        if (shouldSend)
+        {
+            if (session->udp_endpoint_.has_value() && udp_socket_)
+            {
+                sendUdp(session, buffer);
+            }
+            else
+            {
+                session->send(buffer);
+            }
+        }
+    }
+}
+
+
+void StreamServer::sendUdp(const std::shared_ptr<StreamSession>& session, const shared_const_buffer& buffer)
+{
+    try
+    {
+        const auto& data = buffer.message().data;
+        // Patch the id field in the serialized data with the per-session UDP sequence number.
+        // The id field is at offset 2 (after 2-byte type) in the base message header, little-endian uint16.
+        std::vector<char> udp_data(data.begin(), data.end());
+        uint16_t seq = session->udp_sequence_++;
+        udp_data[2] = static_cast<char>(seq & 0xFF);
+        udp_data[3] = static_cast<char>((seq >> 8) & 0xFF);
+
+        boost::system::error_code ec;
+        udp_socket_->send_to(boost::asio::buffer(udp_data), *session->udp_endpoint_, 0, ec);
+        if (ec)
+        {
+            LOG(WARNING, LOG_TAG) << "UDP send error to " << session->clientId << ": " << ec.message() << "\n";
+            // Clear UDP endpoint so we fall back to TCP
+            session->udp_endpoint_.reset();
+        }
+    }
+    catch (const std::exception& e)
+    {
+        LOG(ERROR, LOG_TAG) << "Exception in sendUdp: " << e.what() << "\n";
+        session->udp_endpoint_.reset();
     }
 }
 
@@ -239,7 +276,76 @@ void StreamServer::start()
         }
     }
 
+    // Set up UDP socket for audio streaming
+    if (settings_.udp_stream.enabled)
+    {
+        try
+        {
+            const auto& address = settings_.udp_stream.bind_to_address.front();
+            auto endpoint = boost::asio::ip::udp::endpoint(boost::asio::ip::make_address(address), settings_.udp_stream.port);
+            udp_socket_ = std::make_unique<boost::asio::ip::udp::socket>(io_context_, endpoint);
+            LOG(INFO, LOG_TAG) << "UDP streaming socket opened on " << address << ":" << settings_.udp_stream.port << "\n";
+            startUdpReceive();
+        }
+        catch (const boost::system::system_error& e)
+        {
+            LOG(ERROR, LOG_TAG) << "Error creating UDP streaming socket: " << e.what() << ", code: " << e.code() << "\n";
+        }
+    }
+
     startAccept();
+}
+
+
+void StreamServer::startUdpReceive()
+{
+    if (!udp_socket_)
+        return;
+
+    udp_socket_->async_receive_from(
+        boost::asio::buffer(udp_recv_buffer_), udp_remote_endpoint_,
+        [this](const boost::system::error_code& ec, std::size_t bytes_recvd) { handleUdpRegistration(ec, bytes_recvd); });
+}
+
+
+void StreamServer::handleUdpRegistration(const boost::system::error_code& ec, std::size_t bytes_recvd)
+{
+    if (!ec && bytes_recvd >= 2)
+    {
+        // Parse registration packet: 2-byte length prefix (little-endian) + clientId string
+        uint16_t id_len = static_cast<uint8_t>(udp_recv_buffer_[0]) | (static_cast<uint8_t>(udp_recv_buffer_[1]) << 8);
+        if (id_len > 0 && static_cast<size_t>(2 + id_len) <= bytes_recvd)
+        {
+            std::string clientId(udp_recv_buffer_.data() + 2, id_len);
+            LOG(INFO, LOG_TAG) << "UDP registration from clientId: " << clientId << " at " << udp_remote_endpoint_ << "\n";
+
+            std::lock_guard<std::recursive_mutex> mlock(sessionsMutex_);
+            for (const auto& weak_session : sessions_)
+            {
+                if (auto session = weak_session.lock())
+                {
+                    if (session->clientId == clientId)
+                    {
+                        session->udp_endpoint_ = udp_remote_endpoint_;
+                        session->udp_sequence_ = 0;
+                        LOG(INFO, LOG_TAG) << "UDP endpoint registered for session: " << clientId << "\n";
+                        break;
+                    }
+                }
+            }
+        }
+        else
+        {
+            LOG(WARNING, LOG_TAG) << "Invalid UDP registration packet, id_len: " << id_len << ", bytes: " << bytes_recvd << "\n";
+        }
+    }
+    else if (ec)
+    {
+        LOG(ERROR, LOG_TAG) << "UDP receive error: " << ec.message() << "\n";
+    }
+
+    // Continue receiving
+    startUdpReceive();
 }
 
 
@@ -248,6 +354,13 @@ void StreamServer::stop()
     for (auto& acceptor : acceptor_)
         acceptor->cancel();
     acceptor_.clear();
+
+    if (udp_socket_)
+    {
+        boost::system::error_code ec;
+        udp_socket_->close(ec);
+        udp_socket_.reset();
+    }
 
     std::lock_guard<std::recursive_mutex> mlock(sessionsMutex_);
     cleanup();

@@ -28,9 +28,11 @@
 
 // 3rd party headers
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/ip/udp.hpp>
 #include <boost/asio/steady_timer.hpp>
 
 // standard headers
+#include <array>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -81,6 +83,13 @@ private:
     void handleAccept(tcp::socket socket);
     void cleanup();
 
+    /// Start async UDP receive loop for client registration
+    void startUdpReceive();
+    /// Handle a received UDP registration packet
+    void handleUdpRegistration(const boost::system::error_code& ec, std::size_t bytes_recvd);
+    /// Send a WireChunk to a session via UDP
+    void sendUdp(const std::shared_ptr<StreamSession>& session, const shared_const_buffer& buffer);
+
     /// Implementation of StreamMessageReceiver
     void onMessageReceived(const std::shared_ptr<StreamSession>& streamSession, const msg::BaseMessage& baseMessage, char* buffer) override;
     void onDisconnect(StreamSession* streamSession) override;
@@ -90,6 +99,13 @@ private:
     boost::asio::io_context& io_context_;
     std::vector<acceptor_ptr> acceptor_;
     boost::asio::steady_timer config_timer_;
+
+    /// UDP socket for audio streaming
+    std::unique_ptr<boost::asio::ip::udp::socket> udp_socket_;
+    /// Buffer for incoming UDP registration packets
+    std::array<char, 256> udp_recv_buffer_;
+    /// Remote endpoint for incoming UDP packets
+    boost::asio::ip::udp::endpoint udp_remote_endpoint_;
 
     ServerSettings settings_;
     Queue<std::shared_ptr<msg::BaseMessage>> messages_;

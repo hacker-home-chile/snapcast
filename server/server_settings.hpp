@@ -209,6 +209,17 @@ struct ServerSettings
         bool publish{true};
     };
 
+    /// UDP streaming client settings
+    struct UdpStream
+    {
+        /// enable UDP audio streaming
+        bool enabled{true};
+        /// UDP port
+        size_t port{1706};
+        /// UDP listen addresses
+        std::vector<std::string> bind_to_address{{"::"}};
+    };
+
     /// Stream settings
     struct Stream
     {
@@ -252,6 +263,7 @@ struct ServerSettings
     Http http;                       ///< HTTP settings
     TcpControl tcp_control;          ///< TCP-Control settings
     TcpStream tcp_stream;            ///< TCP-Stream settings
+    UdpStream udp_stream;            ///< UDP-Stream settings
     Stream stream;                   ///< Stream settings
     StreamingClient streamingclient; ///< Client settings
     Logging logging;                 ///< Logging settings
