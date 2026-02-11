@@ -24,12 +24,26 @@ RUN mkdir -p /runtime-libs \
       cp "$lib" /runtime-libs/; \
     done
 
+# Download snapweb
+ARG SNAPWEB_VERSION=0.9.3
+RUN wget -q "https://github.com/snapcast/snapweb/releases/download/v${SNAPWEB_VERSION}/snapweb.zip" \
+ && mkdir -p /snapweb \
+ && unzip -q snapweb.zip -d /snapweb \
+ && rm snapweb.zip
+
 FROM alpine:edge
 
 RUN apk add --no-cache libstdc++
 
 COPY --from=builder /runtime-libs/ /usr/lib/
 COPY --from=builder /src/bin/snapserver /usr/bin/snapserver
+COPY --from=builder /snapweb/ /usr/share/snapserver/snapweb/
+
+# Default config: serve snapweb and use opus codec with FEC
+RUN mkdir -p /etc && printf '[http]\n\
+doc_root = /usr/share/snapserver/snapweb\n\
+[stream]\n\
+codec = opus\n' > /etc/snapserver.conf
 
 EXPOSE 1704 1705 1706 1780
 
