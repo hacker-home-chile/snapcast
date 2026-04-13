@@ -31,6 +31,7 @@
 #include <boost/asio/strand.hpp>
 
 // standard headers
+#include <array>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -191,6 +192,10 @@ public:
     std::optional<boost::asio::ip::udp::endpoint> udp_endpoint_;
     /// Per-session UDP sequence counter for WireChunk ordering
     uint16_t udp_sequence_{0};
+    /// Scratch header (type+seq, 4 bytes) used to patch the UDP packet without
+    /// copying the full payload. The remainder of the datagram is sent via
+    /// scatter-gather using the original shared buffer.
+    std::array<char, 4> udp_header_scratch_{};
 
 protected:
     /// Send next message from "messages_"

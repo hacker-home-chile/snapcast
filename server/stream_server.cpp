@@ -125,15 +125,27 @@ void StreamServer::sendUdp(const std::shared_ptr<StreamSession>& session, const 
     try
     {
         const auto& data = buffer.message().data;
-        // Patch the id field in the serialized data with the per-session UDP sequence number.
-        // The id field is at offset 2 (after 2-byte type) in the base message header, little-endian uint16.
-        std::vector<char> udp_data(data.begin(), data.end());
+        if (data.size() < 4)
+            return;
+
+        // The base message header begins with: type (bytes 0-1), id (bytes 2-3).
+        // We need to patch the id with a per-session UDP sequence number, but
+        // the source buffer is shared across sessions and must not be mutated.
+        // Instead of copying the entire payload, stage a 4-byte scratch header
+        // in the session and send it alongside the rest of the payload using
+        // scatter-gather. This keeps the hot path allocation-free.
         uint16_t seq = session->udp_sequence_++;
-        udp_data[2] = static_cast<char>(seq & 0xFF);
-        udp_data[3] = static_cast<char>((seq >> 8) & 0xFF);
+        session->udp_header_scratch_[0] = data[0];
+        session->udp_header_scratch_[1] = data[1];
+        session->udp_header_scratch_[2] = static_cast<char>(seq & 0xFF);
+        session->udp_header_scratch_[3] = static_cast<char>((seq >> 8) & 0xFF);
+
+        std::array<boost::asio::const_buffer, 2> bufs = {
+            boost::asio::buffer(session->udp_header_scratch_.data(), 4),
+            boost::asio::buffer(data.data() + 4, data.size() - 4)};
 
         boost::system::error_code ec;
-        udp_socket_->send_to(boost::asio::buffer(udp_data), *session->udp_endpoint_, 0, ec);
+        udp_socket_->send_to(bufs, *session->udp_endpoint_, 0, ec);
         if (ec)
         {
             LOG(WARNING, LOG_TAG) << "UDP send error to " << session->clientId << ": " << ec.message() << "\n";
