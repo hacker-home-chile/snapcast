@@ -339,7 +339,13 @@ void StreamServer::handleUdpRegistration(const boost::system::error_code& ec, st
                     if (session->clientId == clientId)
                     {
                         session->udp_endpoint_ = udp_remote_endpoint_;
-                        session->udp_sequence_ = 0;
+                        // NOTE: do NOT reset udp_sequence_ here. Clients
+                        // re-register periodically (every ~5s) to refresh
+                        // the NAT mapping; resetting the sequence on every
+                        // re-registration desynchronises the client's
+                        // reorder buffer and causes it to reject packets
+                        // as late. The struct default already initialises
+                        // udp_sequence_ to 0 on fresh sessions.
                         LOG(INFO, LOG_TAG) << "UDP endpoint registered for session: " << clientId << "\n";
                         break;
                     }
