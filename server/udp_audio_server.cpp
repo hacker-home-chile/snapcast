@@ -75,6 +75,12 @@ size_t UdpAudioServer::registeredClients() const
     return clients_.size();
 }
 
+bool UdpAudioServer::hasClient(const std::string& client_id) const
+{
+    std::lock_guard<std::mutex> lk(clients_mutex_);
+    return clients_.find(client_id) != clients_.end();
+}
+
 void UdpAudioServer::startReceive()
 {
     if (!running_) return;

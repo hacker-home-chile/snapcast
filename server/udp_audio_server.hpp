@@ -53,6 +53,12 @@ public:
     /// Number of clients currently registered.
     size_t registeredClients() const;
 
+    /// True if @p client_id has registered for UDP audio. Used by
+    /// StreamServer to skip redundant TCP WireChunk sends to UDP clients —
+    /// doubling up the audio wastes WiFi airtime and adds jitter on the
+    /// ESP without any functional benefit (our ESP drops TCP WireChunks).
+    bool hasClient(const std::string& client_id) const;
+
 private:
     using endpoint = boost::asio::ip::udp::endpoint;
 

@@ -23,6 +23,7 @@
 #include "common/aixlog.hpp"
 #include "config.hpp"
 #include "stream_session_tcp.hpp"
+#include "udp_audio_server.hpp"
 
 // 3rd party headers
 
@@ -92,6 +93,15 @@ void StreamServer::onChunkEncoded(const PcmStream* pcmStream, bool isDefaultStre
 
     for (const auto& session : sessions)
     {
+        // udp-music: don't TCP-send audio to clients that are receiving it
+        // over UDP. Doubling up wastes WiFi airtime, adds per-chunk jitter
+        // on the ESP's LwIP thread, and forces the ESP to drain + discard
+        // every WireChunk. Skipping keeps TCP quiet for UDP clients while
+        // still letting stock TCP clients (e.g., the ledfx-feeder
+        // sidecar) receive their audio normally.
+        if (udp_audio_server_ && udp_audio_server_->hasClient(session->clientId))
+            continue;
+
         if (!settings_.stream.sendAudioToMutedClients)
         {
             std::lock_guard<std::mutex> lock(Config::instance().getMutex());

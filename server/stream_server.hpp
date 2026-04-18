@@ -26,6 +26,8 @@
 #include "server_settings.hpp"
 #include "stream_session.hpp"
 
+class UdpAudioServer;
+
 // 3rd party headers
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -71,6 +73,11 @@ public:
     /// Callback for chunks that are ready to be sent
     void onChunkEncoded(const PcmStream* pcmStream, bool isDefaultStream, const std::shared_ptr<msg::PcmChunk>& chunk, double duration);
 
+    /// udp-music: register the UdpAudioServer so we can skip TCP WireChunk
+    /// sends to clients that are receiving audio over UDP. Optional — if
+    /// unset, falls back to sending audio to all TCP sessions.
+    void setUdpAudioServer(const UdpAudioServer* udp) { udp_audio_server_ = udp; }
+
     /// @return stream session for @p clientId
     session_ptr getStreamSession(const std::string& clientId) const;
     /// @return stream session for @p session
@@ -94,4 +101,5 @@ private:
     ServerSettings settings_;
     Queue<std::shared_ptr<msg::BaseMessage>> messages_;
     StreamMessageReceiver* messageReceiver_;
+    const UdpAudioServer* udp_audio_server_ = nullptr;
 };

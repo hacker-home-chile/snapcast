@@ -460,6 +460,7 @@ void Server::start()
             udpAudioServer_ = std::make_unique<UdpAudioServer>(io_context_, settings_.udp_stream.bind_to_address,
                                                                settings_.udp_stream.port,
                                                                static_cast<uint8_t>(settings_.udp_stream.fec_group_size));
+            streamServer_->setUdpAudioServer(udpAudioServer_.get());
         }
         streamManager_ = std::make_unique<StreamManager>(this, io_context_, settings_);
 
