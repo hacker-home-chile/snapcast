@@ -125,9 +125,20 @@ void UdpAudioServer::handleRegistration(const endpoint& from, size_t bytes)
     }
     else if (it->second->ep != from)
     {
+        // Endpoint change = client rebooted / roamed. Reset transport state
+        // so the ESP, which anchors g_next_expected_seq to the first seq it
+        // sees, doesn't end up chasing a stale high counter from before.
         LOG(INFO, LOG_TAG) << "client '" << client_id << "' endpoint updated to "
-                           << from.address().to_string() << ":" << from.port() << "\n";
-        it->second->ep = from;
+                           << from.address().to_string() << ":" << from.port()
+                           << ", resetting transport state\n";
+        auto& cs = *it->second;
+        cs.ep          = from;
+        cs.seq         = 0;
+        cs.fec_group   = 0;
+        cs.fec_idx     = 0;
+        cs.length_xor  = 0;
+        cs.xor_max_len = 0;
+        std::fill(cs.xor_accum.begin(), cs.xor_accum.end(), 0);
     }
 }
 

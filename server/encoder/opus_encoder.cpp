@@ -35,7 +35,14 @@ namespace encoder
 #define ID_OPUS 0x4F505553
 static constexpr opus_int32 const_min_bitrate = 6000;
 static constexpr opus_int32 const_max_bitrate = 512000;
-static constexpr int min_chunk_size = 10;
+// udp-music: was 10 ms. When the source sample rate differs from Opus's
+// 48 kHz (e.g. librespot/mixer at 44.1 kHz), the resampler emits ~20.08 ms
+// per 20 ms input → greedy 20 ms branch takes 20, leaves ~0.08 ms, those
+// bytes accumulate in the remainder buffer, fill to 10 ms in ~one call and
+// then the flow is locked into "10 ms from remainder + 10 ms from greedy"
+// per input forever — doubling the output chunk rate. Raising the minimum
+// to 20 ms keeps output at one frame per input and doesn't lose data.
+static constexpr int min_chunk_size = 20;
 
 static constexpr auto LOG_TAG = "OpusEnc";
 

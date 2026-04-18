@@ -229,18 +229,15 @@ void AsioStream<ReadStream>::do_read()
         // the timestamp will be incremented after encoding,
         // since we do not know how much the encoder actually encoded
 
-        // udp-music: catch pre-buffered sources (e.g. librespot dumping its
-        // internal buffer on connect) that make tvEncodedChunk_ lag wall
-        // clock. Without this, the first chunk the client sees already has
-        // age >= 0 and the HARD-1 resync loop fires forever. Threshold at
-        // 500 ms lets a brief server read stall drift without thrashing,
-        // but catches real pipeline latency early enough that the ESP32
-        // doesn't need a multi-second playout buffer to compensate.
+        // udp-music: catch pre-buffered sources that make tvEncodedChunk_
+        // lag wall clock (librespot dumping buffer on connect, source
+        // stalls, etc). Without this, chunks are stamped with stale times
+        // and the client's age math concludes every chunk is already late.
         if (!first_)
         {
             auto now = std::chrono::steady_clock::now();
             auto stream2systime_diff = now - tvEncodedChunk_;
-            if (stream2systime_diff > chronos::msec(500) + chronos::msec(chunk_ms_))
+            if (stream2systime_diff > chronos::msec(200))
             {
                 LOG(WARNING, "AsioStream") << "Stream and system time out of sync: "
                                            << std::chrono::duration_cast<std::chrono::microseconds>(stream2systime_diff).count() / 1000.
