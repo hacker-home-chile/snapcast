@@ -71,14 +71,13 @@ void StreamServer::addSession(const std::shared_ptr<StreamSession>& session)
 
 void StreamServer::onChunkEncoded(const PcmStream* pcmStream, bool isDefaultStream, const std::shared_ptr<msg::PcmChunk>& chunk, double /*duration*/)
 {
-    // udp-music: when the UDP audio transport is enabled we ship encoded
-    // audio over UDP from Server::onChunkEncoded; TCP stream sessions only
-    // carry control traffic (Hello/ServerSettings/Time/CodecHeader). Avoid
-    // queueing wire chunks into TCP send queues which would both waste
-    // bandwidth and cause head-of-line stalls on lossy links.
-    if (settings_.udp_stream.enabled)
-        return;
-
+    // udp-music: BOTH TCP and UDP transports now carry audio. The UDP
+    // broadcast happens in Server::onChunkEncoded; the TCP fan-out below
+    // stays live so stock snapclients (e.g., the Alpine pkg that feeds
+    // LedFx over a FIFO) keep working unchanged. The tradeoff is that
+    // every chunk goes out twice for UDP-registered clients, but since
+    // those clients simply don't consume WireChunks they only pay the
+    // upload bandwidth — still cheap on LAN.
     // LOG(TRACE, LOG_TAG) << "onChunkRead (" << pcmStream->getName() << "): " << duration << "ms\n";
     shared_const_buffer buffer(*chunk);
 
