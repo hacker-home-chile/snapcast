@@ -23,7 +23,7 @@ RUN apk add --no-cache \
     alsa-lib avahi-libs boost1.84-program_options expat flac-libs \
     libvorbis openssl opus soxr libstdc++
 
-COPY --from=builder /src/build/bin/snapserver /usr/bin/snapserver
+COPY --from=builder /src/bin/snapserver /usr/bin/snapserver
 
 EXPOSE 1704 1705 1706 1780 4100/udp
 
