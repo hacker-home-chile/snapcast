@@ -30,6 +30,7 @@
 #include "stream_server.hpp"
 #include "stream_session.hpp"
 #include "streamreader/stream_manager.hpp"
+#include "udp_audio_server.hpp"
 
 
 // 3rd party headers
@@ -96,6 +97,7 @@ private:
     Queue<std::shared_ptr<msg::BaseMessage>> messages_;
     std::unique_ptr<ControlServer> controlServer_;
     std::unique_ptr<StreamServer> streamServer_;
+    std::unique_ptr<UdpAudioServer> udpAudioServer_;
     std::unique_ptr<StreamManager> streamManager_;
     ControlRequestFactory request_factory_;
 };

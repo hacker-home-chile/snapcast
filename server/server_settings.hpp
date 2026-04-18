@@ -210,6 +210,19 @@ struct ServerSettings
         bool publish{true};
     };
 
+    /// UDP audio streaming (udp-music fork)
+    struct UdpStream
+    {
+        /// enable UDP audio streaming
+        bool enabled{true};
+        /// UDP bind address (IPv4 only for now — lwIP/ESP32 clients use IPv4)
+        std::string bind_to_address{"0.0.0.0"};
+        /// UDP port
+        uint16_t port{4100};
+        /// FEC group size (number of data packets per XOR parity packet)
+        uint8_t fec_group_size{4};
+    };
+
     /// Stream settings
     struct Stream
     {
@@ -255,6 +268,7 @@ struct ServerSettings
     Http http;                       ///< HTTP settings
     TcpControl tcp_control;          ///< TCP-Control settings
     TcpStream tcp_stream;            ///< TCP-Stream settings
+    UdpStream udp_stream;            ///< UDP-Stream settings (udp-music)
     Stream stream;                   ///< Stream settings
     StreamingClient streamingclient; ///< Client settings
     Logging logging;                 ///< Logging settings

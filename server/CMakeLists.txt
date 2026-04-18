@@ -13,6 +13,7 @@ set(SERVER_SOURCES
     stream_session.cpp
     stream_session_tcp.cpp
     stream_session_ws.cpp
+    udp_audio_server.cpp
     encoder/encoder_factory.cpp
     encoder/pcm_encoder.cpp
     encoder/null_encoder.cpp

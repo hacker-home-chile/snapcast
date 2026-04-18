@@ -146,6 +146,14 @@ int main(int argc, char* argv[])
                                                               settings.tcp_stream.bind_to_address.front(), &settings.tcp_stream.bind_to_address[0]);
         conf.add<Value<bool>>("", "tcp-streaming.publish", "Publish TCP streaming service via mDNS", settings.tcp_stream.publish, &settings.tcp_stream.publish);
 
+        // UDP audio streaming (udp-music fork) settings
+        conf.add<Value<bool>>("", "udp-streaming.enabled", "enable UDP audio streaming", settings.udp_stream.enabled, &settings.udp_stream.enabled);
+        conf.add<Value<std::string>>("", "udp-streaming.bind_to_address", "address for the UDP audio server to listen on",
+                                     settings.udp_stream.bind_to_address, &settings.udp_stream.bind_to_address);
+        conf.add<Value<uint16_t>>("", "udp-streaming.port", "UDP port for audio streaming", settings.udp_stream.port, &settings.udp_stream.port);
+        conf.add<Value<uint8_t>>("", "udp-streaming.fec_group_size", "Number of data packets per XOR parity packet",
+                                 settings.udp_stream.fec_group_size, &settings.udp_stream.fec_group_size);
+
         // stream settings
         conf.add<Value<std::filesystem::path>>("", "stream.plugin_dir", "stream plugin directory", settings.stream.plugin_dir, &settings.stream.plugin_dir);
         conf.add<Value<std::filesystem::path>>("", "stream.sandbox_dir", "directory with executable process stream sources", settings.stream.sandbox_dir,

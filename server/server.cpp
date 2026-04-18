@@ -93,6 +93,11 @@ void Server::onChunkRead(const PcmStream* pcmStream, const msg::PcmChunk& chunk)
 void Server::onChunkEncoded(const PcmStream* pcmStream, std::shared_ptr<msg::PcmChunk> chunk, double duration)
 {
     streamServer_->onChunkEncoded(pcmStream, pcmStream == streamManager_->getDefaultStream().get(), chunk, duration);
+    // udp-music: fan out the same encoded chunk over UDP to registered
+    // clients. Only audio-carrying streams go here; the UdpAudioServer
+    // itself is codec-agnostic, but the client expects Opus frames.
+    if (udpAudioServer_ && chunk)
+        udpAudioServer_->broadcast(*chunk);
 }
 
 
@@ -450,6 +455,11 @@ void Server::start()
     {
         controlServer_ = std::make_unique<ControlServer>(io_context_, settings_, this);
         streamServer_ = std::make_unique<StreamServer>(io_context_, settings_, this);
+        if (settings_.udp_stream.enabled)
+        {
+            udpAudioServer_ = std::make_unique<UdpAudioServer>(io_context_, settings_.udp_stream.bind_to_address,
+                                                               settings_.udp_stream.port, settings_.udp_stream.fec_group_size);
+        }
         streamManager_ = std::make_unique<StreamManager>(this, io_context_, settings_);
 
         // Add normal sources first
@@ -480,6 +490,8 @@ void Server::start()
         streamManager_->start();
         controlServer_->start();
         streamServer_->start();
+        if (udpAudioServer_)
+            udpAudioServer_->start();
     }
     catch (const std::exception& e)
     {

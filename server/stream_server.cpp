@@ -71,6 +71,14 @@ void StreamServer::addSession(const std::shared_ptr<StreamSession>& session)
 
 void StreamServer::onChunkEncoded(const PcmStream* pcmStream, bool isDefaultStream, const std::shared_ptr<msg::PcmChunk>& chunk, double /*duration*/)
 {
+    // udp-music: when the UDP audio transport is enabled we ship encoded
+    // audio over UDP from Server::onChunkEncoded; TCP stream sessions only
+    // carry control traffic (Hello/ServerSettings/Time/CodecHeader). Avoid
+    // queueing wire chunks into TCP send queues which would both waste
+    // bandwidth and cause head-of-line stalls on lossy links.
+    if (settings_.udp_stream.enabled)
+        return;
+
     // LOG(TRACE, LOG_TAG) << "onChunkRead (" << pcmStream->getName() << "): " << duration << "ms\n";
     shared_const_buffer buffer(*chunk);
 
