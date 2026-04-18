@@ -1,13 +1,3 @@
-FROM alpine:3.21 AS snapweb
-
-# Fetch the pre-built snapweb UI bundle matching upstream snapserver releases.
-RUN apk add --no-cache curl unzip \
- && mkdir -p /snapweb \
- && curl -fsSL https://github.com/snapcast/snapweb/releases/download/v0.9.3/snapweb.zip \
-      -o /tmp/snapweb.zip \
- && unzip -d /snapweb /tmp/snapweb.zip
-
-
 FROM alpine:3.21 AS builder
 
 RUN apk add --no-cache \
@@ -34,8 +24,8 @@ RUN apk add --no-cache \
     libvorbis openssl opus soxr libstdc++ \
     socat
 
-COPY --from=builder /src/bin/snapserver /usr/bin/snapserver
-COPY --from=snapweb  /snapweb           /usr/share/snapweb
+COPY --from=builder /src/bin/snapserver       /usr/bin/snapserver
+COPY --from=builder /src/server/etc/snapweb/  /usr/share/snapweb/
 
 EXPOSE 1704 1705 1780 4100/udp
 
