@@ -219,8 +219,9 @@ struct ServerSettings
         std::string bind_to_address{"0.0.0.0"};
         /// UDP port
         uint16_t port{4100};
-        /// FEC group size (number of data packets per XOR parity packet)
-        uint8_t fec_group_size{4};
+        /// FEC group size (number of data packets per XOR parity packet).
+        /// Wider than needed because popl's ASCII parsing mangles u8.
+        size_t fec_group_size{4};
     };
 
     /// Stream settings

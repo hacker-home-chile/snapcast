@@ -151,8 +151,8 @@ int main(int argc, char* argv[])
         conf.add<Value<std::string>>("", "udp-streaming.bind_to_address", "address for the UDP audio server to listen on",
                                      settings.udp_stream.bind_to_address, &settings.udp_stream.bind_to_address);
         conf.add<Value<uint16_t>>("", "udp-streaming.port", "UDP port for audio streaming", settings.udp_stream.port, &settings.udp_stream.port);
-        conf.add<Value<uint8_t>>("", "udp-streaming.fec_group_size", "Number of data packets per XOR parity packet",
-                                 settings.udp_stream.fec_group_size, &settings.udp_stream.fec_group_size);
+        conf.add<Value<size_t>>("", "udp-streaming.fec_group_size", "Number of data packets per XOR parity packet",
+                                settings.udp_stream.fec_group_size, &settings.udp_stream.fec_group_size);
 
         // stream settings
         conf.add<Value<std::filesystem::path>>("", "stream.plugin_dir", "stream plugin directory", settings.stream.plugin_dir, &settings.stream.plugin_dir);
