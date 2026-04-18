@@ -1,11 +1,11 @@
 FROM alpine:3.21 AS snapweb
 
 # Fetch the pre-built snapweb UI bundle matching upstream snapserver releases.
-RUN apk add --no-cache curl tar \
+RUN apk add --no-cache curl unzip \
  && mkdir -p /snapweb \
- && curl -fsSL https://github.com/badaix/snapweb/releases/download/v0.10.0/snapweb.zip \
+ && curl -fsSL https://github.com/snapcast/snapweb/releases/download/v0.9.3/snapweb.zip \
       -o /tmp/snapweb.zip \
- && unzip -d /snapweb /tmp/snapweb.zip 2>/dev/null || (apk add --no-cache unzip && unzip -d /snapweb /tmp/snapweb.zip)
+ && unzip -d /snapweb /tmp/snapweb.zip
 
 
 FROM alpine:3.21 AS builder
