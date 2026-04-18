@@ -1,3 +1,16 @@
+FROM alpine:3.21 AS snapweb
+
+# Upstream bundles only a "Snapweb Placeholder" stub in server/etc/snapweb.
+# The full UI (player controls, group/client management, library) lives in a
+# separate release at snapcast/snapweb — fetch it here.
+ARG SNAPWEB_VERSION=0.9.3
+RUN apk add --no-cache curl unzip \
+ && mkdir -p /snapweb \
+ && curl -fsSL "https://github.com/snapcast/snapweb/releases/download/v${SNAPWEB_VERSION}/snapweb.zip" \
+      -o /tmp/snapweb.zip \
+ && unzip -d /snapweb /tmp/snapweb.zip
+
+
 FROM alpine:3.21 AS builder
 
 RUN apk add --no-cache \
@@ -24,8 +37,8 @@ RUN apk add --no-cache \
     libvorbis openssl opus soxr libstdc++ \
     socat
 
-COPY --from=builder /src/bin/snapserver       /usr/bin/snapserver
-COPY --from=builder /src/server/etc/snapweb/  /usr/share/snapweb/
+COPY --from=builder /src/bin/snapserver  /usr/bin/snapserver
+COPY --from=snapweb /snapweb             /usr/share/snapweb
 
 EXPOSE 1704 1705 1780 4100/udp
 
