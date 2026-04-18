@@ -21,12 +21,14 @@ FROM alpine:3.21
 
 RUN apk add --no-cache \
     alsa-lib avahi-libs boost1.84-program_options expat flac-libs \
-    libvorbis openssl opus soxr libstdc++
+    libvorbis openssl opus soxr libstdc++ \
+    socat
 
 COPY --from=builder /src/bin/snapserver /usr/bin/snapserver
 
-EXPOSE 1704 1705 1706 1780 4100/udp
+EXPOSE 1704 1705 1780 4100/udp
 
 VOLUME ["/config", "/data"]
 
 ENTRYPOINT ["snapserver"]
+CMD ["-c", "/config/snapserver.conf"]
