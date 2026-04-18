@@ -1,7 +1,6 @@
-FROM alpine:edge AS builder
+FROM alpine:3.21 AS builder
 
-RUN echo "https://dl-cdn.alpinelinux.org/alpine/edge/testing/" >> /etc/apk/repositories \
- && apk add --no-cache \
+RUN apk add --no-cache \
     build-base cmake ninja ccache \
     alsa-lib-dev avahi-dev boost-dev expat-dev flac-dev \
     libvorbis-dev openssl-dev opus-dev soxr-dev
@@ -18,16 +17,15 @@ RUN cmake -S . -B build -G Ninja \
     -DBUILD_WITH_PIPEWIRE=OFF \
  && cmake --build build --parallel
 
-FROM alpine:edge
+FROM alpine:3.21
 
-RUN echo "https://dl-cdn.alpinelinux.org/alpine/edge/testing/" >> /etc/apk/repositories \
- && apk add --no-cache \
-    alsa-lib avahi-libs boost1.86-program_options expat flac-libs \
+RUN apk add --no-cache \
+    alsa-lib avahi-libs boost1.84-program_options expat flac-libs \
     libvorbis openssl opus soxr libstdc++
 
 COPY --from=builder /src/build/bin/snapserver /usr/bin/snapserver
 
-EXPOSE 1704 1705 1706 1780
+EXPOSE 1704 1705 1706 1780 4100/udp
 
 VOLUME ["/config", "/data"]
 
