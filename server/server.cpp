@@ -314,6 +314,15 @@ void Server::onMessageReceived(const std::shared_ptr<StreamSession>& streamSessi
         msg::Hello helloMsg;
         helloMsg.deserialize(baseMessage, buffer);
         streamSession->clientId = helloMsg.getUniqueId();
+
+        // udp-music: a client that lost its TCP control session and just
+        // reconnected leaves a stale StreamSession in sessions_ until lwIP
+        // delivers RST/FIN — could be many seconds. During that window
+        // getStreamSession(clientId) returns the dead one (it's earlier in
+        // the vector), so Client.SetVolume / SetMute pushes land in a
+        // corpse and never reach the client. Kill prior sessions for this
+        // clientId now.
+        streamServer_->stopOtherSessions(streamSession->clientId, streamSession.get());
         auto auth = helloMsg.getAuth();
         // TODO: don't log passwords
         LOG(INFO, LOG_TAG) << "Hello from " << streamSession->clientId << ", host: " << helloMsg.getHostName() << ", v" << helloMsg.getVersion()

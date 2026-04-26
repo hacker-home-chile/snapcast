@@ -83,6 +83,13 @@ public:
     /// @return stream session for @p session
     session_ptr getStreamSession(StreamSession* session) const;
 
+    /// udp-music: stop every session that claims @p clientId except @p keep.
+    /// Called when a fresh Hello arrives so Client.SetVolume / ServerSettings
+    /// pushes can't land in a half-dead pre-reboot session that lwIP hasn't
+    /// fully torn down yet (race between client RST and getStreamSession's
+    /// first-match lookup).
+    void stopOtherSessions(const std::string& clientId, StreamSession* keep);
+
 private:
     void startAccept();
     void handleAccept(tcp::socket socket);

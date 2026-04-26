@@ -183,6 +183,22 @@ session_ptr StreamServer::getStreamSession(StreamSession* streamSession) const
 }
 
 
+void StreamServer::stopOtherSessions(const std::string& clientId, StreamSession* keep)
+{
+    std::lock_guard<std::recursive_mutex> mlock(sessionsMutex_);
+    for (const auto& weak : sessions_)
+    {
+        auto s = weak.lock();
+        if (!s || s.get() == keep)
+            continue;
+        if (s->clientId != clientId)
+            continue;
+        LOG(INFO, LOG_TAG) << "stopping stale session for " << clientId << " superseded by new Hello\n";
+        s->stop();  // triggers onDisconnect → removes from sessions_
+    }
+}
+
+
 session_ptr StreamServer::getStreamSession(const std::string& clientId) const
 {
     //	LOG(INFO, LOG_TAG) << "getStreamSession: " << mac << "\n";
