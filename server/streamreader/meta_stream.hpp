@@ -20,6 +20,7 @@
 
 
 // local headers
+#include "active_selector.hpp"
 #include "common/resampler.hpp"
 #include "pcm_stream.hpp"
 
@@ -77,8 +78,12 @@ protected:
 
 private:
     std::vector<std::shared_ptr<PcmStream>> streams_;
-    std::recursive_mutex active_mutex_;
-    std::shared_ptr<PcmStream> active_stream_;
+    /// Holds the currently-active child stream. The selector's snapshot-
+    /// then-apply contract closes the data race that the prior
+    /// active_mutex_/PcmStream::mutex_ split allowed: per-property RPCs
+    /// (setVolume, setMute, ...) and the auto-switching path in
+    /// onStateChanged now share a single source of truth.
+    ActiveSelector<PcmStream> active_selector_;
     std::unique_ptr<Resampler> resampler_;
     bool first_read_;
     std::chrono::time_point<std::chrono::steady_clock> next_tick_;

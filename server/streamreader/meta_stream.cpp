@@ -62,8 +62,9 @@ MetaStream::MetaStream(PcmStream::Listener* pcmListener, const std::vector<std::
     if (streams_.empty())
         throw SnapException("Meta stream '" + getName() + "' must contain at least one stream");
 
-    active_stream_ = streams_.front();
-    resampler_ = make_unique<Resampler>(active_stream_->getSampleFormat(), sampleFormat_);
+    auto first = streams_.front();
+    active_selector_.set(first);
+    resampler_ = make_unique<Resampler>(first->getSampleFormat(), sampleFormat_);
 }
 
 
@@ -89,8 +90,8 @@ void MetaStream::stop()
 void MetaStream::onPropertiesChanged(const PcmStream* pcmStream, const Properties& properties)
 {
     LOG(DEBUG, LOG_TAG) << "onPropertiesChanged: " << pcmStream->getName() << "\n";
-    // std::lock_guard<std::recursive_mutex> lock(mutex_);
-    if (pcmStream != active_stream_.get())
+    auto active = active_selector_.get();
+    if (!active || pcmStream != active.get())
         return;
     setProperties(properties);
 }
@@ -99,7 +100,6 @@ void MetaStream::onPropertiesChanged(const PcmStream* pcmStream, const Propertie
 void MetaStream::onStateChanged(const PcmStream* pcmStream, ReaderState state)
 {
     LOG(DEBUG, LOG_TAG) << "onStateChanged: " << pcmStream->getName() << ", state: " << state << "\n";
-    std::lock_guard<std::recursive_mutex> lock(active_mutex_);
 
     // Should a pause keep the stream active? E.g. Spotify can only pause, so it would never get inactive
     // if (active_stream_->getProperties().playback_status == PlaybackStatus::kPaused)
@@ -107,26 +107,26 @@ void MetaStream::onStateChanged(const PcmStream* pcmStream, ReaderState state)
 
     auto switch_stream = [this](const std::shared_ptr<PcmStream>& new_stream)
     {
-        if (new_stream == active_stream_)
+        auto current = active_selector_.get();
+        if (new_stream == current)
             return;
-        LOG(INFO, LOG_TAG) << "Stream: " << name_ << ", switching active stream: " << (active_stream_ ? active_stream_->getName() : "<null>") << " => "
+        LOG(INFO, LOG_TAG) << "Stream: " << name_ << ", switching active stream: " << (current ? current->getName() : "<null>") << " => "
                            << new_stream->getName() << "\n";
-        active_stream_ = new_stream;
-        setProperties(active_stream_->getProperties());
-        resampler_ = make_unique<Resampler>(active_stream_->getSampleFormat(), sampleFormat_);
+        active_selector_.set(new_stream);
+        setProperties(new_stream->getProperties());
+        resampler_ = make_unique<Resampler>(new_stream->getSampleFormat(), sampleFormat_);
     };
 
     for (const auto& stream : streams_)
     {
         if (stream->getState() == ReaderState::kPlaying)
         {
-            if (state_ != ReaderState::kPlaying) // || (active_stream_ != stream))
+            if (state_ != ReaderState::kPlaying)
                 first_read_ = true;
 
-            if (active_stream_ != stream)
-            {
+            auto current = active_selector_.get();
+            if (current != stream)
                 switch_stream(stream);
-            }
 
             setState(ReaderState::kPlaying);
             return;
@@ -141,9 +141,8 @@ void MetaStream::onStateChanged(const PcmStream* pcmStream, ReaderState state)
 void MetaStream::onChunkRead(const PcmStream* pcmStream, const msg::PcmChunk& chunk)
 {
     // LOG(TRACE, LOG_TAG) << "onChunkRead: " << pcmStream->getName() << ", duration: " << chunk.durationMs() << "\n";
-    // std::lock_guard<std::recursive_mutex> lock(mutex_);
-    std::lock_guard<std::recursive_mutex> lock(active_mutex_);
-    if (pcmStream != active_stream_.get())
+    auto active = active_selector_.get();
+    if (!active || pcmStream != active.get())
         return;
     // active_stream_->sampleFormat_
     // sampleFormat_
@@ -200,110 +199,144 @@ void MetaStream::onChunkEncoded(const PcmStream* pcmStream, std::shared_ptr<msg:
 void MetaStream::onResync(const PcmStream* pcmStream, double ms)
 {
     LOG(DEBUG, LOG_TAG) << "onResync: " << pcmStream->getName() << ", duration: " << ms << " ms\n";
-    // std::lock_guard<std::recursive_mutex> lock(mutex_);
-    if (pcmStream != active_stream_.get())
+    auto active = active_selector_.get();
+    if (!active || pcmStream != active.get())
         return;
     resync(std::chrono::nanoseconds(static_cast<int64_t>(ms * 1000000)));
 }
 
 
+// Property/command delegation: each method snapshots the active child via
+// applyToActive, then invokes the underlying call OUTSIDE the selector's
+// lock. The shared_ptr snapshot keeps the child alive even if onStateChanged
+// switches active_selector_ to a different stream mid-call — closing the
+// data race the prior split-mutex code had.
 
-// Setter for properties
 void MetaStream::setShuffle(bool shuffle, ResultHandler&& handler)
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    active_stream_->setShuffle(shuffle, std::move(handler));
+    active_selector_.applyToActive([shuffle, h = std::move(handler)](PcmStream& s) mutable
+    {
+        s.setShuffle(shuffle, std::move(h));
+    });
 }
 
 void MetaStream::setLoopStatus(LoopStatus status, ResultHandler&& handler)
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    active_stream_->setLoopStatus(status, std::move(handler));
+    active_selector_.applyToActive([status, h = std::move(handler)](PcmStream& s) mutable
+    {
+        s.setLoopStatus(status, std::move(h));
+    });
 }
 
 void MetaStream::setVolume(uint16_t volume, ResultHandler&& handler)
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    active_stream_->setVolume(volume, std::move(handler));
+    active_selector_.applyToActive([volume, h = std::move(handler)](PcmStream& s) mutable
+    {
+        s.setVolume(volume, std::move(h));
+    });
 }
 
 void MetaStream::setMute(bool mute, ResultHandler&& handler)
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    active_stream_->setMute(mute, std::move(handler));
+    active_selector_.applyToActive([mute, h = std::move(handler)](PcmStream& s) mutable
+    {
+        s.setMute(mute, std::move(h));
+    });
 }
 
 void MetaStream::setRate(float rate, ResultHandler&& handler)
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    active_stream_->setRate(rate, std::move(handler));
+    active_selector_.applyToActive([rate, h = std::move(handler)](PcmStream& s) mutable
+    {
+        s.setRate(rate, std::move(h));
+    });
 }
 
 
 // Control commands
 void MetaStream::setPosition(std::chrono::milliseconds position, ResultHandler&& handler)
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    active_stream_->setPosition(position, std::move(handler));
+    active_selector_.applyToActive([position, h = std::move(handler)](PcmStream& s) mutable
+    {
+        s.setPosition(position, std::move(h));
+    });
 }
 
 void MetaStream::seek(std::chrono::milliseconds offset, ResultHandler&& handler)
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    active_stream_->seek(offset, std::move(handler));
+    active_selector_.applyToActive([offset, h = std::move(handler)](PcmStream& s) mutable
+    {
+        s.seek(offset, std::move(h));
+    });
 }
 
 void MetaStream::next(ResultHandler&& handler)
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    active_stream_->next(std::move(handler));
+    active_selector_.applyToActive([h = std::move(handler)](PcmStream& s) mutable
+    {
+        s.next(std::move(h));
+    });
 }
 
 void MetaStream::previous(ResultHandler&& handler)
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    active_stream_->previous(std::move(handler));
+    active_selector_.applyToActive([h = std::move(handler)](PcmStream& s) mutable
+    {
+        s.previous(std::move(h));
+    });
 }
 
 void MetaStream::pause(ResultHandler&& handler)
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    active_stream_->pause(std::move(handler));
+    active_selector_.applyToActive([h = std::move(handler)](PcmStream& s) mutable
+    {
+        s.pause(std::move(h));
+    });
 }
 
 void MetaStream::playPause(ResultHandler&& handler)
 {
     LOG(DEBUG, LOG_TAG) << "PlayPause\n";
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    if (active_stream_->getState() == ReaderState::kIdle)
+    auto active = active_selector_.get();
+    if (!active)
+        return;
+    if (active->getState() == ReaderState::kIdle)
         play(std::move(handler));
     else
-        active_stream_->playPause(std::move(handler));
+        active->playPause(std::move(handler));
 }
 
 void MetaStream::stop(ResultHandler&& handler)
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    active_stream_->stop(std::move(handler));
+    active_selector_.applyToActive([h = std::move(handler)](PcmStream& s) mutable
+    {
+        s.stop(std::move(h));
+    });
 }
 
 void MetaStream::play(ResultHandler&& handler)
 {
     LOG(DEBUG, LOG_TAG) << "Play\n";
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    if ((active_stream_->getProperties().can_play) && (active_stream_->getProperties().playback_status != PlaybackStatus::kPlaying))
-        return active_stream_->play(std::move(handler));
+    auto active = active_selector_.get();
+    if (active && active->getProperties().can_play &&
+        active->getProperties().playback_status != PlaybackStatus::kPlaying)
+    {
+        active->play(std::move(handler));
+        return;
+    }
 
     for (const auto& stream : streams_)
     {
         if ((stream->getState() == ReaderState::kIdle) && (stream->getProperties().can_play))
         {
-            return stream->play(std::move(handler));
+            stream->play(std::move(handler));
+            return;
         }
     }
 
     // call play on the active stream to get the handler called
-    active_stream_->play(std::move(handler));
+    if (active)
+        active->play(std::move(handler));
 }
 
 
