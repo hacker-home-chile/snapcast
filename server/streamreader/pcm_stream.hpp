@@ -195,6 +195,25 @@ public:
 
     /// Add a pcm listener
     void addListener(PcmStream::Listener* pcmListener);
+    /// Remove a pcm listener (no-op if not registered)
+    void removeListener(PcmStream::Listener* pcmListener);
+
+    /// @return wall-clock time the next-encoded chunk will be stamped with.
+    /// Used by ChannelSliceStream to forward the parent's timestamp to its
+    /// own encoder so all slices stamp identical times for the same ingest.
+    std::chrono::time_point<std::chrono::steady_clock> getTvEncodedChunk() const
+    {
+        return tvEncodedChunk_;
+    }
+
+    /// @return true if this stream should be omitted from default
+    /// JSON-RPC enumeration (set via URI query "hidden=true"). Used to keep
+    /// parent multi-channel streams off the client-facing assignable list
+    /// when only their slices should be selectable.
+    bool isHidden() const
+    {
+        return hidden_;
+    }
 
 protected:
     /// Stream is active (started?
@@ -264,6 +283,8 @@ protected:
     std::unique_ptr<msg::PcmChunk> chunk_;
     /// Silent chunk (all 0), for fast silence detection (memcmp)
     std::vector<char> silent_chunk_;
+    /// If true, omit from default JSON-RPC enumeration
+    bool hidden_ = false;
 };
 
 } // namespace streamreader

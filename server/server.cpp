@@ -477,17 +477,17 @@ void Server::start()
         for (const auto& sourceUri : settings_.stream.sources)
         {
             StreamUri streamUri(sourceUri);
-            if (streamUri.scheme == "meta")
+            if (streamUri.scheme == "meta" || streamUri.scheme == "slice")
                 continue;
             PcmStreamPtr stream = streamManager_->addStream(streamUri, PcmStream::Source::config);
             if (stream)
                 LOG(INFO, LOG_TAG) << "Stream: " << stream->getUri().toJson() << "\n";
         }
-        // Add meta sources second
+        // Add meta and slice sources second — they reference earlier streams by name.
         for (const auto& sourceUri : settings_.stream.sources)
         {
             StreamUri streamUri(sourceUri);
-            if (streamUri.scheme != "meta")
+            if (streamUri.scheme != "meta" && streamUri.scheme != "slice")
                 continue;
             PcmStreamPtr stream = streamManager_->addStream(streamUri, PcmStream::Source::config);
             if (stream)

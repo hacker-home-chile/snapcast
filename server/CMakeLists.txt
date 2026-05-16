@@ -28,6 +28,7 @@ set(SERVER_SOURCES
     streamreader/airplay_stream.cpp
     streamreader/librespot_stream.cpp
     streamreader/meta_stream.cpp
+    streamreader/channel_slice_stream.cpp
     streamreader/watchdog.cpp
     streamreader/properties.cpp
     streamreader/metadata.cpp

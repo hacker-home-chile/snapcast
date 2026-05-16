@@ -24,6 +24,7 @@ set(TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_time_provider.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_volume_rpc_routing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_active_selector.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_channel_slice.cpp
     ${CMAKE_SOURCE_DIR}/client/time_provider.cpp
     ${CMAKE_SOURCE_DIR}/common/stream_uri.cpp
     ${CMAKE_SOURCE_DIR}/common/base64.cpp

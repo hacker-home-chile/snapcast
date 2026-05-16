@@ -35,6 +35,7 @@
 #include <boost/asio/ip/host_name.hpp>
 
 // standard headers
+#include <algorithm>
 #include <memory>
 
 
@@ -92,6 +93,9 @@ PcmStream::PcmStream(PcmStream::Listener* pcmListener, boost::asio::io_context& 
     int32_t max_amplitude = std::pow(2, sampleFormat_.bits() - 1) - 1;
     silence_threshold_ = max_amplitude * (silence_threshold_percent / 100.);
     LOG(DEBUG, LOG_TAG) << "Silence threshold percent: " << silence_threshold_percent << ", silence threshold amplitude: " << silence_threshold_ << "\n";
+
+    auto hidden_str = uri_.getQuery("hidden", "false");
+    hidden_ = (hidden_str == "true" || hidden_str == "1");
 }
 
 
@@ -394,6 +398,12 @@ json PcmStream::toJson() const
 void PcmStream::addListener(PcmStream::Listener* pcmListener)
 {
     pcmListeners_.push_back(pcmListener);
+}
+
+
+void PcmStream::removeListener(PcmStream::Listener* pcmListener)
+{
+    pcmListeners_.erase(std::remove(pcmListeners_.begin(), pcmListeners_.end(), pcmListener), pcmListeners_.end());
 }
 
 
