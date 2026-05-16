@@ -9,6 +9,7 @@ set(SERVER_SOURCES
     # jwt.cpp
     snapserver.cpp
     server.cpp
+    session_directory.cpp
     stream_server.cpp
     stream_session.cpp
     stream_session_tcp.cpp

@@ -102,23 +102,27 @@ void UdpAudioServer::startReceive()
             }));
 }
 
-void UdpAudioServer::handleRegistration(const endpoint& from, size_t bytes)
+std::optional<std::string> UdpAudioServer::parseRegistration(const uint8_t* data, size_t bytes)
 {
     // Registration frame: 4-byte magic "UDPR" + client_id (up to 255 bytes,
     // no terminator required).
-    if (bytes < sizeof(kRegistrationMagic) + 1)
-        return;
-    if (std::memcmp(rx_buf_.data(), kRegistrationMagic, sizeof(kRegistrationMagic)) != 0)
-        return;
+    if (data == nullptr) return std::nullopt;
+    if (bytes < sizeof(kRegistrationMagic) + 1) return std::nullopt;
+    if (std::memcmp(data, kRegistrationMagic, sizeof(kRegistrationMagic)) != 0)
+        return std::nullopt;
 
     size_t id_len = bytes - sizeof(kRegistrationMagic);
     if (id_len > 255) id_len = 255;
-    std::string client_id(reinterpret_cast<const char*>(rx_buf_.data() + sizeof(kRegistrationMagic)), id_len);
+    std::string client_id(reinterpret_cast<const char*>(data + sizeof(kRegistrationMagic)), id_len);
     // Trim trailing NULs / whitespace.
     while (!client_id.empty() && (client_id.back() == '\0' || client_id.back() == ' '))
         client_id.pop_back();
-    if (client_id.empty()) return;
+    if (client_id.empty()) return std::nullopt;
+    return client_id;
+}
 
+UdpAudioServer::RegistrationOutcome UdpAudioServer::applyRegistration(const std::string& client_id, const endpoint& from)
+{
     std::lock_guard<std::mutex> lk(clients_mutex_);
     auto it = clients_.find(client_id);
     if (it == clients_.end())
@@ -128,24 +132,51 @@ void UdpAudioServer::handleRegistration(const endpoint& from, size_t bytes)
         clients_.emplace(client_id, cs);
         LOG(INFO, LOG_TAG) << "registered client '" << client_id << "' at "
                            << from.address().to_string() << ":" << from.port() << "\n";
+        return RegistrationOutcome::Inserted;
     }
-    else if (it->second->ep != from)
-    {
-        // Endpoint change = client rebooted / roamed. Reset transport state
-        // so the ESP, which anchors g_next_expected_seq to the first seq it
-        // sees, doesn't end up chasing a stale high counter from before.
-        LOG(INFO, LOG_TAG) << "client '" << client_id << "' endpoint updated to "
-                           << from.address().to_string() << ":" << from.port()
-                           << ", resetting transport state\n";
-        auto& cs = *it->second;
-        cs.ep          = from;
-        cs.seq         = 0;
-        cs.fec_group   = 0;
-        cs.fec_idx     = 0;
-        cs.length_xor  = 0;
-        cs.xor_max_len = 0;
-        std::fill(cs.xor_accum.begin(), cs.xor_accum.end(), 0);
-    }
+    if (it->second->ep == from)
+        return RegistrationOutcome::Unchanged;
+
+    // Endpoint change = client rebooted / roamed. Reset transport state
+    // so the ESP, which anchors g_next_expected_seq to the first seq it
+    // sees, doesn't end up chasing a stale high counter from before.
+    LOG(INFO, LOG_TAG) << "client '" << client_id << "' endpoint updated to "
+                       << from.address().to_string() << ":" << from.port()
+                       << ", resetting transport state\n";
+    auto& cs = *it->second;
+    cs.ep          = from;
+    cs.seq         = 0;
+    cs.fec_group   = 0;
+    cs.fec_idx     = 0;
+    cs.length_xor  = 0;
+    cs.xor_max_len = 0;
+    std::fill(cs.xor_accum.begin(), cs.xor_accum.end(), 0);
+    return RegistrationOutcome::EndpointChanged;
+}
+
+std::optional<UdpAudioServer::ClientSnapshot> UdpAudioServer::snapshotClient(const std::string& client_id) const
+{
+    std::lock_guard<std::mutex> lk(clients_mutex_);
+    auto it = clients_.find(client_id);
+    if (it == clients_.end()) return std::nullopt;
+    const auto& cs = *it->second;
+    ClientSnapshot snap{};
+    snap.endpoint     = cs.ep;
+    snap.seq          = cs.seq;
+    snap.fec_group    = cs.fec_group;
+    snap.fec_idx      = cs.fec_idx;
+    snap.length_xor   = cs.length_xor;
+    snap.xor_max_len  = cs.xor_max_len;
+    snap.sent_data    = cs.sent_data.load(std::memory_order_relaxed);
+    snap.sent_parity  = cs.sent_parity.load(std::memory_order_relaxed);
+    return snap;
+}
+
+void UdpAudioServer::handleRegistration(const endpoint& from, size_t bytes)
+{
+    auto client_id = parseRegistration(rx_buf_.data(), bytes);
+    if (!client_id) return;
+    applyRegistration(*client_id, from);
 }
 
 void UdpAudioServer::broadcast(const msg::PcmChunk& chunk)
@@ -177,6 +208,37 @@ void UdpAudioServer::broadcast(const msg::PcmChunk& chunk)
             for (auto& cs : targets)
                 sendOneClient(*cs, data.data(), data.size(), ts_sec, ts_usec);
         });
+}
+
+std::optional<UdpAudioServer::FecGroupClose> UdpAudioServer::appendFecData(
+    ClientState& cs, const uint8_t* payload, size_t len, uint8_t fec_n)
+{
+    // Grow the XOR buffer to fit the longest payload seen in this group.
+    // Shorter payloads contribute their bytes plus implicit zero padding,
+    // which is exactly what receivers reconstruct on recovery.
+    if (len > cs.xor_max_len) cs.xor_max_len = len;
+    if (cs.xor_accum.size() < cs.xor_max_len)
+        cs.xor_accum.resize(cs.xor_max_len, 0);
+    for (size_t i = 0; i < len; ++i)
+        cs.xor_accum[i] ^= payload[i];
+    cs.length_xor ^= static_cast<uint32_t>(static_cast<uint16_t>(len));
+    cs.fec_idx++;
+
+    if (cs.fec_idx < fec_n)
+        return std::nullopt;
+
+    FecGroupClose out;
+    out.parity.assign(cs.xor_accum.begin(), cs.xor_accum.begin() + cs.xor_max_len);
+    out.length_xor = cs.length_xor;
+    out.fec_group  = cs.fec_group;
+
+    // Reset group ready for the next batch.
+    cs.fec_idx = 0;
+    cs.length_xor = 0;
+    cs.xor_max_len = 0;
+    std::fill(cs.xor_accum.begin(), cs.xor_accum.end(), 0);
+    cs.fec_group++;
+    return out;
 }
 
 void UdpAudioServer::sendOneClient(ClientState& cs, const uint8_t* payload, size_t len,
@@ -212,22 +274,14 @@ void UdpAudioServer::sendOneClient(ClientState& cs, const uint8_t* payload, size
             }));
     cs.sent_data.fetch_add(1, std::memory_order_relaxed);
 
-    // XOR-accumulate for FEC parity.
-    if (len > cs.xor_max_len) cs.xor_max_len = len;
-    if (cs.xor_accum.size() < cs.xor_max_len)
-        cs.xor_accum.resize(cs.xor_max_len, 0);
-    for (size_t i = 0; i < len; ++i)
-        cs.xor_accum[i] ^= payload[i];
-    cs.length_xor ^= static_cast<uint32_t>(static_cast<uint16_t>(len));
-    cs.fec_idx++;
-
-    if (cs.fec_idx >= fec_n_)
-        closeGroup(cs, timestamp_sec, timestamp_usec);
+    if (auto close = appendFecData(cs, payload, len, fec_n_))
+        sendParityPacket(cs, *close, timestamp_usec);
 }
 
-void UdpAudioServer::closeGroup(ClientState& cs, uint32_t timestamp_sec, uint32_t timestamp_usec)
+void UdpAudioServer::sendParityPacket(ClientState& cs, const FecGroupClose& close,
+                                      uint32_t timestamp_usec)
 {
-    const size_t plen = cs.xor_max_len;
+    const size_t plen = close.parity.size();
     auto buf = std::make_shared<std::vector<uint8_t>>();
     buf->resize(msg::kUdpAudioHeaderSize + plen);
 
@@ -237,15 +291,14 @@ void UdpAudioServer::closeGroup(ClientState& cs, uint32_t timestamp_sec, uint32_
     h.flags          = msg::kUdpFlagIsParity;
     h.fec_group_size = fec_n_;
     h.seq            = cs.seq++;
-    h.fec_group      = cs.fec_group;
+    h.fec_group      = close.fec_group;
     h.timestamp_us   = timestamp_usec;
-    (void)timestamp_sec;  // parity packets use `aux` for length_xor instead
     h.payload_len    = static_cast<uint16_t>(plen);
     h.reserved0      = 0;
-    h.aux            = cs.length_xor;
+    h.aux            = close.length_xor;  // parity packets use aux for length_xor
     msg::encodeUdpAudioHeader(buf->data(), h);
     if (plen > 0)
-        std::memcpy(buf->data() + msg::kUdpAudioHeaderSize, cs.xor_accum.data(), plen);
+        std::memcpy(buf->data() + msg::kUdpAudioHeaderSize, close.parity.data(), plen);
 
     auto ep = cs.ep;
     socket_.async_send_to(boost::asio::buffer(*buf), ep,
@@ -256,11 +309,4 @@ void UdpAudioServer::closeGroup(ClientState& cs, uint32_t timestamp_sec, uint32_
                     LOG(TRACE, LOG_TAG) << "parity err: " << ec.message() << "\n";
             }));
     cs.sent_parity.fetch_add(1, std::memory_order_relaxed);
-
-    // Reset group.
-    cs.fec_idx = 0;
-    cs.length_xor = 0;
-    cs.xor_max_len = 0;
-    std::fill(cs.xor_accum.begin(), cs.xor_accum.end(), 0);
-    cs.fec_group++;
 }

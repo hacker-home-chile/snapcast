@@ -23,7 +23,7 @@
 #include "common/aixlog.hpp"
 #include "config.hpp"
 #include "stream_session_tcp.hpp"
-#include "udp_audio_server.hpp"
+#include "udp_client_presence.hpp"
 
 // 3rd party headers
 
@@ -48,13 +48,9 @@ StreamServer::~StreamServer() = default;
 
 void StreamServer::cleanup()
 {
-    auto new_end = std::remove_if(sessions_.begin(), sessions_.end(), [](const std::weak_ptr<StreamSession>& session) { return session.expired(); });
-    auto count = distance(new_end, sessions_.end());
-    if (count > 0)
-    {
-        LOG(INFO, LOG_TAG) << "Removing " << count << " inactive session(s), active sessions: " << sessions_.size() - count << "\n";
-        sessions_.erase(new_end, sessions_.end());
-    }
+    auto removed = sessions_.cleanup();
+    if (removed > 0)
+        LOG(INFO, LOG_TAG) << "Removed " << removed << " inactive session(s), active sessions: " << sessions_.size() << "\n";
 }
 
 
@@ -63,10 +59,7 @@ void StreamServer::addSession(const std::shared_ptr<StreamSession>& session)
     session->setMessageReceiver(this);
     session->setBufferMs(settings_.stream.bufferMs);
     session->start();
-
-    std::lock_guard<std::recursive_mutex> mlock(sessionsMutex_);
-    sessions_.emplace_back(session);
-    cleanup();
+    sessions_.add(session);
 }
 
 
@@ -82,14 +75,8 @@ void StreamServer::onChunkEncoded(const PcmStream* pcmStream, bool isDefaultStre
     // LOG(TRACE, LOG_TAG) << "onChunkRead (" << pcmStream->getName() << "): " << duration << "ms\n";
     shared_const_buffer buffer(*chunk);
 
-    // make a copy of the sessions to avoid that a session get's deleted
-    std::vector<std::shared_ptr<StreamSession>> sessions;
-    {
-        std::lock_guard<std::recursive_mutex> mlock(sessionsMutex_);
-        for (const auto& session : sessions_)
-            if (auto s = session.lock())
-                sessions.push_back(s);
-    }
+    // snapshot keeps the iteration safe even if a session disconnects mid-fan-out
+    auto sessions = sessions_.snapshot();
 
     for (const auto& session : sessions)
     {
@@ -99,7 +86,7 @@ void StreamServer::onChunkEncoded(const PcmStream* pcmStream, bool isDefaultStre
         // every WireChunk. Skipping keeps TCP quiet for UDP clients while
         // still letting stock TCP clients (e.g., the ledfx-feeder
         // sidecar) receive their audio normally.
-        if (udp_audio_server_ && udp_audio_server_->hasClient(session->clientId))
+        if (isUdpRegistered(session->clientId))
             continue;
 
         if (!settings_.stream.sendAudioToMutedClients)
@@ -147,69 +134,38 @@ void StreamServer::onMessageReceived(const std::shared_ptr<StreamSession>& strea
 
 void StreamServer::onDisconnect(StreamSession* streamSession)
 {
-    std::lock_guard<std::recursive_mutex> mlock(sessionsMutex_);
-    session_ptr session = getStreamSession(streamSession);
-
+    session_ptr session = sessions_.findByRawPointer(streamSession);
     if (session == nullptr)
         return;
 
     LOG(INFO, LOG_TAG) << "onDisconnect: " << session->clientId << "\n";
-    LOG(DEBUG, LOG_TAG) << "sessions: " << sessions_.size() << "\n";
-    sessions_.erase(std::remove_if(sessions_.begin(), sessions_.end(),
-                                   [streamSession](const std::weak_ptr<StreamSession>& session)
-    {
-        auto s = session.lock();
-        return s.get() == streamSession;
-    }),
-                    sessions_.end());
-    LOG(DEBUG, LOG_TAG) << "sessions: " << sessions_.size() << "\n";
+    sessions_.remove(streamSession);
     if (messageReceiver_ != nullptr)
         messageReceiver_->onDisconnect(streamSession);
-    cleanup();
 }
 
 
 session_ptr StreamServer::getStreamSession(StreamSession* streamSession) const
 {
-    std::lock_guard<std::recursive_mutex> mlock(sessionsMutex_);
-
-    for (const auto& session : sessions_)
-    {
-        if (auto s = session.lock())
-            if (s.get() == streamSession)
-                return s;
-    }
-    return nullptr;
+    return sessions_.findByRawPointer(streamSession);
 }
 
 
 void StreamServer::stopOtherSessions(const std::string& clientId, StreamSession* keep)
 {
-    std::lock_guard<std::recursive_mutex> mlock(sessionsMutex_);
-    for (const auto& weak : sessions_)
-    {
-        auto s = weak.lock();
-        if (!s || s.get() == keep)
-            continue;
-        if (s->clientId != clientId)
-            continue;
-        LOG(INFO, LOG_TAG) << "stopping stale session for " << clientId << " superseded by new Hello\n";
-        s->stop();  // triggers onDisconnect → removes from sessions_
-    }
+    sessions_.stopOthers(clientId, keep);
+}
+
+
+bool StreamServer::isUdpRegistered(const std::string& clientId) const
+{
+    return ::isUdpRegistered(udp_audio_server_, clientId);
 }
 
 
 session_ptr StreamServer::getStreamSession(const std::string& clientId) const
 {
-    //	LOG(INFO, LOG_TAG) << "getStreamSession: " << mac << "\n";
-    std::lock_guard<std::recursive_mutex> mlock(sessionsMutex_);
-    for (const auto& session : sessions_)
-    {
-        if (auto s = session.lock())
-            if (s->clientId == clientId)
-                return s;
-    }
-    return nullptr;
+    return sessions_.findByClientId(clientId);
 }
 
 
@@ -282,11 +238,6 @@ void StreamServer::stop()
         acceptor->cancel();
     acceptor_.clear();
 
-    std::lock_guard<std::recursive_mutex> mlock(sessionsMutex_);
-    cleanup();
-    for (const auto& s : sessions_)
-    {
-        if (auto session = s.lock())
-            session->stop();
-    }
+    sessions_.cleanup();
+    sessions_.stopAll();
 }

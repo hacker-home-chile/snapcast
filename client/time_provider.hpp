@@ -52,6 +52,17 @@ public:
     /// Set diff from round-trip-times client-to-server and server-to-client
     void setDiff(const tv& c2s, const tv& s2c);
 
+    /// Pure: compute the clock drift (in microseconds) from the two
+    /// round-trip-time samples produced during a Time message exchange.
+    /// Public + static so it can be exercised in unit tests without
+    /// touching the TimeProvider singleton or its median buffer.
+    ///
+    /// drift = ((c2s - s2c) / 2), expressed in microseconds. A positive
+    /// value means "server clock is ahead of client clock by this much."
+    /// The arithmetic intentionally splits sec and usec to avoid integer
+    /// overflow on large RTTs while preserving sub-millisecond resolution.
+    static chronos::usec::rep computeDriftUsec(const tv& c2s, const tv& s2c);
+
     /// @return time diff to server
     template <typename T>
     inline T getDiffToServer() const

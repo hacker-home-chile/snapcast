@@ -24,9 +24,10 @@
 #include "common/queue.hpp"
 #include "control_server.hpp"
 #include "server_settings.hpp"
+#include "session_directory.hpp"
 #include "stream_session.hpp"
 
-class UdpAudioServer;
+#include "udp_client_presence.hpp"
 
 // 3rd party headers
 #include <boost/asio/io_context.hpp>
@@ -73,10 +74,16 @@ public:
     /// Callback for chunks that are ready to be sent
     void onChunkEncoded(const PcmStream* pcmStream, bool isDefaultStream, const std::shared_ptr<msg::PcmChunk>& chunk, double duration);
 
-    /// udp-music: register the UdpAudioServer so we can skip TCP WireChunk
-    /// sends to clients that are receiving audio over UDP. Optional — if
-    /// unset, falls back to sending audio to all TCP sessions.
-    void setUdpAudioServer(const UdpAudioServer* udp) { udp_audio_server_ = udp; }
+    /// udp-music: register a UdpClientPresence (UdpAudioServer in production)
+    /// so the TCP fan-out can skip WireChunk sends to clients receiving
+    /// audio over UDP. Optional — if unset, all TCP sessions receive audio
+    /// (stock TCP-only behavior).
+    void setUdpAudioServer(const UdpClientPresence* udp) { udp_audio_server_ = udp; }
+
+    /// True when @p clientId is currently receiving audio over UDP and
+    /// therefore should be skipped in the TCP WireChunk fan-out. Nullsafe
+    /// against the "no UDP transport configured" case.
+    bool isUdpRegistered(const std::string& clientId) const;
 
     /// @return stream session for @p clientId
     session_ptr getStreamSession(const std::string& clientId) const;
@@ -99,8 +106,7 @@ private:
     void onMessageReceived(const std::shared_ptr<StreamSession>& streamSession, const msg::BaseMessage& baseMessage, char* buffer) override;
     void onDisconnect(StreamSession* streamSession) override;
 
-    mutable std::recursive_mutex sessionsMutex_;
-    std::vector<std::weak_ptr<StreamSession>> sessions_;
+    SessionDirectory sessions_;
     boost::asio::io_context& io_context_;
     std::vector<acceptor_ptr> acceptor_;
     boost::asio::steady_timer config_timer_;
@@ -108,5 +114,5 @@ private:
     ServerSettings settings_;
     Queue<std::shared_ptr<msg::BaseMessage>> messages_;
     StreamMessageReceiver* messageReceiver_;
-    const UdpAudioServer* udp_audio_server_ = nullptr;
+    const UdpClientPresence* udp_audio_server_ = nullptr;
 };

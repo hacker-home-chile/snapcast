@@ -33,13 +33,19 @@ TimeProvider::TimeProvider() : diffToServer_(0)
 }
 
 
-void TimeProvider::setDiff(const tv& c2s, const tv& s2c)
+chronos::usec::rep TimeProvider::computeDriftUsec(const tv& c2s, const tv& s2c)
 {
     //	tv latency = c2s - s2c;
     //	double diff = (latency.sec * 1000. + latency.usec / 1000.) / 2.;
-    double diff = (static_cast<double>(c2s.sec) / 2. - static_cast<double>(s2c.sec) / 2.) * 1000. +
-                  (static_cast<double>(c2s.usec) / 2. - static_cast<double>(s2c.usec) / 2.) / 1000.;
-    setDiffToServer(diff);
+    const double diff_ms = (static_cast<double>(c2s.sec) / 2. - static_cast<double>(s2c.sec) / 2.) * 1000. +
+                           (static_cast<double>(c2s.usec) / 2. - static_cast<double>(s2c.usec) / 2.) / 1000.;
+    return static_cast<chronos::usec::rep>(diff_ms * 1000);
+}
+
+
+void TimeProvider::setDiff(const tv& c2s, const tv& s2c)
+{
+    setDiffToServer(static_cast<double>(computeDriftUsec(c2s, s2c)) / 1000.0);
 }
 
 
