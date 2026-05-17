@@ -23,6 +23,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -70,10 +71,24 @@ public:
     /// Stop the receive loop.
     void stop();
 
-    /// Fan an encoded audio chunk out to all registered clients.
-    /// Called by StreamServer::onChunkEncoded. The payload must be a
-    /// single self-contained frame (currently Opus).
-    void broadcast(const msg::PcmChunk& chunk);
+    /// Resolves a clientId → the stream id the client is currently bound
+    /// to (via its group), or "" if the client is unknown. Used by
+    /// broadcast() to send each chunk only to clients on the originating
+    /// stream — without this filter, every PcmStream's chunks fan out to
+    /// every UDP client and interleave on the wire (10 streams × 50 pps
+    /// = 500 pps per client, all decoded as garbage).
+    using ClientStreamResolver = std::function<std::string(const std::string& clientId)>;
+
+    /// Install the resolver used by broadcast() for per-client stream
+    /// filtering. If no resolver is set (e.g. unit tests), broadcast()
+    /// falls back to sending every chunk to every client.
+    void setClientStreamResolver(ClientStreamResolver resolver);
+
+    /// Fan an encoded audio chunk for @p stream_id out to every UDP
+    /// client whose resolver-reported stream matches. Called by
+    /// Server::onChunkEncoded. The payload must be a single
+    /// self-contained frame (currently Opus).
+    void broadcast(const std::string& stream_id, const msg::PcmChunk& chunk);
 
     /// Number of clients currently registered.
     size_t registeredClients() const;
@@ -167,6 +182,9 @@ private:
 
     mutable std::mutex clients_mutex_;
     std::unordered_map<std::string, std::shared_ptr<ClientState>> clients_;
+
+    mutable std::mutex resolver_mutex_;
+    ClientStreamResolver client_stream_resolver_;
 
     bool running_ = false;
 };

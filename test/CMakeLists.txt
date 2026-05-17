@@ -20,6 +20,7 @@ set(TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_udp_dedup.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_udp_registration.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_udp_fec.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_udp_broadcast_filter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_message_framing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_time_provider.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_volume_rpc_routing.cpp

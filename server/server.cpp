@@ -94,10 +94,12 @@ void Server::onChunkEncoded(const PcmStream* pcmStream, std::shared_ptr<msg::Pcm
 {
     streamServer_->onChunkEncoded(pcmStream, pcmStream == streamManager_->getDefaultStream().get(), chunk, duration);
     // udp-music: fan out the same encoded chunk over UDP to registered
-    // clients. Only audio-carrying streams go here; the UdpAudioServer
-    // itself is codec-agnostic, but the client expects Opus frames.
-    if (udpAudioServer_ && chunk)
-        udpAudioServer_->broadcast(*chunk);
+    // clients on this stream. The per-stream filter lives inside
+    // UdpAudioServer::broadcast (resolver installed in start()); without
+    // it, N parallel PcmStreams flood every UDP client with N× the
+    // packet rate of N different audio sources interleaved.
+    if (udpAudioServer_ && chunk && pcmStream)
+        udpAudioServer_->broadcast(pcmStream->getId(), *chunk);
 }
 
 
@@ -469,6 +471,16 @@ void Server::start()
             udpAudioServer_ = std::make_unique<UdpAudioServer>(io_context_, settings_.udp_stream.bind_to_address,
                                                                settings_.udp_stream.port,
                                                                static_cast<uint8_t>(settings_.udp_stream.fec_group_size));
+            // Resolver lets broadcast() filter chunks per client. Returns
+            // the stream id the client's group is currently bound to,
+            // or "" if the client is unknown / has no group yet.
+            udpAudioServer_->setClientStreamResolver(
+                [](const std::string& clientId) -> std::string
+                {
+                    std::lock_guard<std::mutex> lock(Config::instance().getMutex());
+                    GroupPtr group = Config::instance().getGroupFromClient(clientId);
+                    return group ? group->streamId : std::string{};
+                });
             streamServer_->setUdpAudioServer(udpAudioServer_.get());
         }
         streamManager_ = std::make_unique<StreamManager>(this, io_context_, settings_);

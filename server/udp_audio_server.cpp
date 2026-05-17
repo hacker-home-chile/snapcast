@@ -179,7 +179,13 @@ void UdpAudioServer::handleRegistration(const endpoint& from, size_t bytes)
     applyRegistration(*client_id, from);
 }
 
-void UdpAudioServer::broadcast(const msg::PcmChunk& chunk)
+void UdpAudioServer::setClientStreamResolver(ClientStreamResolver resolver)
+{
+    std::lock_guard<std::mutex> lk(resolver_mutex_);
+    client_stream_resolver_ = std::move(resolver);
+}
+
+void UdpAudioServer::broadcast(const std::string& stream_id, const msg::PcmChunk& chunk)
 {
     if (chunk.payloadSize == 0 || chunk.payload == nullptr) return;
 
@@ -190,23 +196,44 @@ void UdpAudioServer::broadcast(const msg::PcmChunk& chunk)
     const uint32_t ts_sec = static_cast<uint32_t>(chunk.timestamp.sec);
     const uint32_t ts_usec = static_cast<uint32_t>(chunk.timestamp.usec);
 
-    std::vector<std::shared_ptr<ClientState>> targets;
+    // Snapshot (clientId, state) under the clients mutex so the strand
+    // task doesn't race a registration/removal.
+    std::vector<std::pair<std::string, std::shared_ptr<ClientState>>> targets;
     {
         std::lock_guard<std::mutex> lk(clients_mutex_);
         targets.reserve(clients_.size());
-        for (auto& kv : clients_) targets.push_back(kv.second);
+        for (auto& kv : clients_) targets.emplace_back(kv.first, kv.second);
     }
     if (targets.empty()) return;
+
+    ClientStreamResolver resolver;
+    {
+        std::lock_guard<std::mutex> lk(resolver_mutex_);
+        resolver = client_stream_resolver_;
+    }
 
     const auto* payload = reinterpret_cast<const uint8_t*>(chunk.payload);
     const size_t len = static_cast<size_t>(chunk.payloadSize);
 
     // Boost asio UDP isn't thread-safe — serialize sends on our strand.
     boost::asio::post(strand_,
-        [this, targets = std::move(targets), data = std::vector<uint8_t>(payload, payload + len), ts_sec, ts_usec]() mutable
+        [this, targets = std::move(targets), resolver = std::move(resolver),
+         stream_id, data = std::vector<uint8_t>(payload, payload + len), ts_sec, ts_usec]() mutable
         {
-            for (auto& cs : targets)
-                sendOneClient(*cs, data.data(), data.size(), ts_sec, ts_usec);
+            for (auto& kv : targets)
+            {
+                if (resolver)
+                {
+                    const auto cs_stream = resolver(kv.first);
+                    // Empty resolved id == unknown client (no group yet).
+                    // Skip unconditionally: blasting audio to a client
+                    // that hasn't picked a stream just wastes airtime,
+                    // even if the broadcast stream_id is itself empty.
+                    if (cs_stream.empty() || cs_stream != stream_id)
+                        continue;
+                }
+                sendOneClient(*kv.second, data.data(), data.size(), ts_sec, ts_usec);
+            }
         });
 }
 
