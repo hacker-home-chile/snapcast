@@ -32,6 +32,7 @@ find_package(OpenSSL REQUIRED)
 include_directories(SYSTEM ${Boost_INCLUDE_DIR})
 
 add_executable(snapcast_test ${TEST_SOURCES})
+target_include_directories(snapcast_test PRIVATE ${CMAKE_SOURCE_DIR}/server)
 
 if(ANDROID)
   target_link_libraries(snapcast_test log)
