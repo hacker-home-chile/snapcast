@@ -70,6 +70,8 @@ protected:
 
     /// Cache last exception to avoid repeated error logging
     std::string lastException_;
+    /// Live producers already pace their PCM; do not apply a second read clock.
+    bool realtime_{false};
     /// Marker: next chunk is the first chunk
     bool first_;
 
@@ -120,6 +122,7 @@ AsioStream<ReadStream>::AsioStream(PcmStream::Listener* pcmListener, boost::asio
 
     idle_threshold_ = std::chrono::milliseconds(std::max(cpt::stoi(uri_.getQuery("idle_threshold", "100")), 10));
 
+    realtime_ = uri_.getQuery("realtime", "false") == "true";
     buffer_ms_ = 50;
 
     try
@@ -241,6 +244,17 @@ void AsioStream<ReadStream>::do_read()
         //         first_ = true;
         //     }
         // }
+        if (realtime_ && !first_)
+        {
+            const auto lateness = std::chrono::steady_clock::now() - (tvEncodedChunk_ + chunk_->duration<std::chrono::nanoseconds>());
+            // Small producer/write-boundary jitter must not change sample time.
+            // Re-anchor only after a genuine interruption of the live source.
+            if (lateness > 100ms)
+            {
+                resync(std::chrono::duration_cast<std::chrono::nanoseconds>(lateness));
+                first_ = true;
+            }
+        }
         if (first_)
         {
             first_ = false;
@@ -249,6 +263,11 @@ void AsioStream<ReadStream>::do_read()
         }
 
         chunkRead(*chunk_);
+        if (realtime_)
+        {
+            do_read();
+            return;
+        }
         nextTick_ += chunk_->duration<std::chrono::nanoseconds>();
         auto currentTick = std::chrono::steady_clock::now();
 

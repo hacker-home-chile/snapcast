@@ -15,3 +15,8 @@ The raw 16-channel matrix parent must remain hidden.
 
 Build with `BUILD_TESTS=ON` and run `bin/snapcast_test` to include the channel
 slice regression tests alongside upstream tests.
+
+Clocked live PCM producers can set `realtime=true` on their source URI. Their
+read boundaries are re-chunked without a second pacing timer; timestamps remain
+sample-continuous across small write/scheduling jitter. A source interruption
+over 100 ms re-anchors the timeline. Leave this off for unpaced files/processes.
