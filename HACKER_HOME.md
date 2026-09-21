@@ -3,7 +3,8 @@
 This branch starts at official Snapcast commit `4fed179e177b251c67326e7b62a25c8d8fb2d1a9`.
 Its only server changes are channel-slice streams, hidden parent streams (ported
 from `addffad837064435a50115f21b62e18303c54279`), and parsing `chunk_ms` before
-allocating the PCM chunk. It does not contain the legacy fork UDP transport.
+allocating the PCM chunk. Stream removal also logs the saved name rather than
+dereferencing an erased iterator (caught by the dynamic matrix integration test). It does not contain the legacy fork UDP transport.
 
 Production configuration and container packaging live separately in
 `hacker-home-chile/hacker-home-server/snapcast`. ESP32 firmware lives in
