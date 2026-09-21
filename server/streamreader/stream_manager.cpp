@@ -32,8 +32,10 @@
 #ifdef HAS_PIPEWIRE
 #include "pipewire_stream.hpp"
 #endif
+#include "channel_slice_stream.hpp"
 #include "common/snap_exception.hpp"
 #include "common/str_compat.hpp"
+#include "common/utils/string_utils.hpp"
 #include "file_stream.hpp"
 #include "librespot_stream.hpp"
 #include "meta_stream.hpp"
@@ -70,6 +72,47 @@ PcmStreamPtr StreamManager::addStream(const std::string& uri, PcmStream::Source 
 
 PcmStreamPtr StreamManager::addStream(StreamUri& streamUri, PcmStream::Source source)
 {
+    // Slice streams inherit sampleformat from the parent — patch it into the
+    // URI before the PcmStream c'tor runs (which requires sampleformat).
+    PcmStreamPtr slice_parent;
+    std::vector<std::uint8_t> slice_channels;
+    if (streamUri.scheme == "slice")
+    {
+        std::string parent_name = streamUri.path;
+        if (!parent_name.empty() && parent_name.front() == '/')
+            parent_name.erase(0, 1);
+        if (parent_name.empty())
+            throw SnapException("slice stream: parent name must be the URI path (slice:///<parent>?...)");
+
+        auto parent_iter = std::find_if(streams_.begin(), streams_.end(),
+                                        [&parent_name](const PcmStreamPtr& s) { return s->getName() == parent_name; });
+        if (parent_iter == streams_.end())
+            throw SnapException("slice stream: parent '" + parent_name + "' not found (must be declared before the slice)");
+        slice_parent = *parent_iter;
+        if (slice_parent->getUri().scheme == "slice")
+            throw SnapException("slice stream: nested slicing is not supported in v1");
+
+        auto channels_str = streamUri.getQuery("channels");
+        if (channels_str.empty())
+            throw SnapException("slice stream: 'channels' query param required (e.g. channels=0,1)");
+        for (const auto& tok : utils::string::split(channels_str, ','))
+        {
+            if (tok.empty())
+                continue;
+            int v = cpt::stoi(tok, -1);
+            if (v < 0 || v > 255)
+                throw SnapException("slice stream: invalid channel index '" + tok + "'");
+            slice_channels.push_back(static_cast<std::uint8_t>(v));
+        }
+        if (slice_channels.empty())
+            throw SnapException("slice stream: channels list must not be empty");
+
+        // Synthesize a sampleformat string from parent rate/bits and slice channel count.
+        const auto& pf = slice_parent->getSampleFormat();
+        streamUri.query[kUriSampleFormat] =
+            cpt::to_string(pf.rate()) + ":" + cpt::to_string(pf.bits()) + ":" + cpt::to_string(slice_channels.size());
+    }
+
     if (streamUri.query.find(kUriSampleFormat) == streamUri.query.end())
         streamUri.query[kUriSampleFormat] = settings_.stream.sampleFormat;
 
@@ -156,6 +199,10 @@ PcmStreamPtr StreamManager::addStream(StreamUri& streamUri, PcmStream::Source so
     {
         stream = make_shared<MetaStream>(listener, streams_, io_context_, settings_, streamUri, source);
     }
+    else if (streamUri.scheme == "slice")
+    {
+        stream = make_shared<ChannelSliceStream>(listener, slice_parent, std::move(slice_channels), io_context_, settings_, streamUri, source);
+    }
     else
     {
         throw SnapException("Unknown stream type: " + streamUri.scheme);
@@ -228,13 +275,13 @@ const PcmStreamPtr StreamManager::getStream(const std::string& id) const
 
 void StreamManager::start()
 {
-    // Start meta streams first
+    // Start meta and slice streams first so they're listening before parents emit.
     for (const auto& stream : streams_)
-        if (stream->getUri().scheme == "meta")
+        if (stream->getUri().scheme == "meta" || stream->getUri().scheme == "slice")
             stream->start();
     // Start normal streams second
     for (const auto& stream : streams_)
-        if (stream->getUri().scheme != "meta")
+        if (stream->getUri().scheme != "meta" && stream->getUri().scheme != "slice")
             stream->start();
 }
 
@@ -243,11 +290,11 @@ void StreamManager::stop()
 {
     // Stop normal streams first
     for (const auto& stream : streams_)
-        if (stream && (stream->getUri().scheme != "meta"))
+        if (stream && (stream->getUri().scheme != "meta") && (stream->getUri().scheme != "slice"))
             stream->stop();
-    // Stop meta streams second
+    // Stop meta/slice streams second
     for (const auto& stream : streams_)
-        if (stream && (stream->getUri().scheme == "meta"))
+        if (stream && ((stream->getUri().scheme == "meta") || (stream->getUri().scheme == "slice")))
             stream->stop();
 }
 
@@ -257,8 +304,10 @@ json StreamManager::toJson() const
     json result = json::array();
     for (const auto& stream : streams_)
     {
-        // A stream with "null" codec will only serve as input for a meta stream, i.e. is not a "stand alone" stream
-        if (stream->getCodec() != "null")
+        // A stream with "null" codec will only serve as input for a meta stream, i.e. is not a "stand alone" stream.
+        // Streams marked hidden=true (e.g. raw multi-channel parents of virtual slices) are likewise
+        // excluded from default enumeration so clients only see the assignable slices.
+        if (stream->getCodec() != "null" && !stream->isHidden())
             result.push_back(stream->toJson());
     }
     return result;

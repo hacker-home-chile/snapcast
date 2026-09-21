@@ -35,6 +35,7 @@
 #include <boost/asio/ip/host_name.hpp>
 
 // standard headers
+#include <algorithm>
 #include <memory>
 
 
@@ -64,6 +65,8 @@ PcmStream::PcmStream(PcmStream::Listener* pcmListener, boost::asio::io_context& 
     if (uri_.query.find(kUriSampleFormat) == uri_.query.end())
         throw SnapException("Stream URI must have a sampleformat");
     sampleFormat_ = SampleFormat(uri_.query[kUriSampleFormat]);
+    if (uri_.query.find(kUriChunkMs) != uri_.query.end())
+        chunk_ms_ = cpt::stoul(uri_.query[kUriChunkMs]);
     chunk_ = std::make_unique<msg::PcmChunk>(sampleFormat_, chunk_ms_);
     silent_chunk_ = std::vector<char>(chunk_->payloadSize, 0);
     LOG(DEBUG, LOG_TAG) << "Chunk duration: " << chunk_->durationMs() << " ms, frames: " << chunk_->getFrameCount() << ", size: " << chunk_->payloadSize
@@ -78,9 +81,6 @@ PcmStream::PcmStream(PcmStream::Listener* pcmListener, boost::asio::io_context& 
         stream_ctrl_ = std::make_unique<ScriptStreamControl>(strand_, server_settings_.stream.plugin_dir, uri_.query[kControlScript], std::move(params));
     }
 
-    if (uri_.query.find(kUriChunkMs) != uri_.query.end())
-        chunk_ms_ = cpt::stoul(uri_.query[kUriChunkMs]);
-
     double silence_threshold_percent = 0.;
     try
     {
@@ -92,6 +92,9 @@ PcmStream::PcmStream(PcmStream::Listener* pcmListener, boost::asio::io_context& 
     int32_t max_amplitude = std::pow(2, sampleFormat_.bits() - 1) - 1;
     silence_threshold_ = max_amplitude * (silence_threshold_percent / 100.);
     LOG(DEBUG, LOG_TAG) << "Silence threshold percent: " << silence_threshold_percent << ", silence threshold amplitude: " << silence_threshold_ << "\n";
+
+    auto hidden_str = uri_.getQuery("hidden", "false");
+    hidden_ = (hidden_str == "true" || hidden_str == "1");
 }
 
 
@@ -394,6 +397,12 @@ json PcmStream::toJson() const
 void PcmStream::addListener(PcmStream::Listener* pcmListener)
 {
     pcmListeners_.push_back(pcmListener);
+}
+
+
+void PcmStream::removeListener(PcmStream::Listener* pcmListener)
+{
+    pcmListeners_.erase(std::remove(pcmListeners_.begin(), pcmListeners_.end(), pcmListener), pcmListeners_.end());
 }
 
 

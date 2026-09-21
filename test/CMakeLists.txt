@@ -16,6 +16,7 @@ endif()
 # Make test executable
 set(TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_channel_slice.cpp
     ${CMAKE_SOURCE_DIR}/common/stream_uri.cpp
     ${CMAKE_SOURCE_DIR}/common/base64.cpp
     ${CMAKE_SOURCE_DIR}/common/utils/string_utils.cpp
