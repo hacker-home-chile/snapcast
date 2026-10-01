@@ -72,6 +72,10 @@ protected:
     std::string lastException_;
     /// Live producers already pace their PCM; do not apply a second read clock.
     bool realtime_{false};
+    /// realtime: latest arrival relative to the frame-count timestamp seen in
+    /// the current window, and the window start
+    std::chrono::nanoseconds maxLateness_{std::chrono::nanoseconds::min()};
+    std::chrono::time_point<std::chrono::steady_clock> lateWindowStart_;
     /// Marker: next chunk is the first chunk
     bool first_;
 
@@ -254,12 +258,36 @@ void AsioStream<ReadStream>::do_read()
                 resync(std::chrono::duration_cast<std::chrono::nanoseconds>(lateness));
                 first_ = true;
             }
+            else
+            {
+                // Timestamps count frames from the anchor, so re-anchoring on a
+                // late chunk leaves every later chunk timestamped ahead of its
+                // arrival: permanent extra latency after each stall. When every
+                // chunk of a 3 s window arrived 25 ms or more before its
+                // timestamp, re-anchor on arrival to remove it.
+                const auto now = std::chrono::steady_clock::now();
+                maxLateness_ = std::max(maxLateness_, std::chrono::duration_cast<std::chrono::nanoseconds>(lateness));
+                if (now - lateWindowStart_ >= 3s)
+                {
+                    if (maxLateness_ < -25ms)
+                    {
+                        LOG(INFO, "AsioStream") << "Stream '" << getName() << "' timestamps lead arrival by "
+                                                << -std::chrono::duration_cast<std::chrono::microseconds>(maxLateness_).count() / 1000.
+                                                << " ms, re-anchoring\n";
+                        first_ = true;
+                    }
+                    lateWindowStart_ = now;
+                    maxLateness_ = std::chrono::nanoseconds::min();
+                }
+            }
         }
         if (first_)
         {
             first_ = false;
             tvEncodedChunk_ = std::chrono::steady_clock::now() - chunk_->duration<std::chrono::nanoseconds>();
             nextTick_ = std::chrono::steady_clock::now();
+            lateWindowStart_ = nextTick_;
+            maxLateness_ = std::chrono::nanoseconds::min();
         }
 
         chunkRead(*chunk_);

@@ -20,3 +20,6 @@ Clocked live PCM producers can set `realtime=true` on their source URI. Their
 read boundaries are re-chunked without a second pacing timer; timestamps remain
 sample-continuous across small write/scheduling jitter. A source interruption
 over 100 ms re-anchors the timeline. Leave this off for unpaced files/processes.
+Re-anchoring on a late chunk leaves later timestamps ahead of their arrival, so
+when every chunk in a 3 s window arrives at least 25 ms early the stream
+re-anchors on arrival to drop that added latency.
